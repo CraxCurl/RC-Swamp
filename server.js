@@ -457,27 +457,40 @@ udpClient.on('message', (msg, rinfo) => {
   }
 });
 
-function triggerFlip360(direction = 'right') {
-  const dir = (direction || 'right').toLowerCase();
+function triggerFlip360(direction = 'forward') {
+  const dir = (direction || 'forward').toLowerCase();
   droneState.isFlipping = true;
-  droneState.isCircleTurnEnd = true;
 
-  if (dir === 'left') droneState.roll = 1;
-  else if (dir === 'right') droneState.roll = 255;
-  else if (dir === 'forward') droneState.pitch = 255;
-  else if (dir === 'backward') droneState.pitch = 1;
-  else droneState.pitch = 255;
+  // STAGE 1: Arm Flip Mode (Flip bit ON, Sticks NEUTRAL 128 for 250ms pre-flip climb)
+  droneState.isCircleTurnEnd = true;
+  droneState.roll = 128;
+  droneState.pitch = 128;
+  droneState.throttle = 128;
+  droneState.yaw = 128;
 
   sendDroneUdp(Buffer.from([0x07, 0x01]));
   sendDroneUdp(Buffer.from([0x08, 0x01]));
   sendFlightPacketBurst(5);
 
+  // STAGE 2: Apply Directional Stick Deflection after 250ms pre-flip climb
+  setTimeout(() => {
+    if (!droneState.isFlipping) return;
+    if (dir === 'left') droneState.roll = 1;
+    else if (dir === 'right') droneState.roll = 255;
+    else if (dir === 'backward') droneState.pitch = 1;
+    else droneState.pitch = 255; // Default FORWARD flip
+    sendFlightPacketBurst(5);
+  }, 250);
+
+  // STAGE 3: Reset after 900ms total flip execution window
   setTimeout(() => {
     droneState.isFlipping = false;
     droneState.isCircleTurnEnd = false;
     droneState.roll = 128;
     droneState.pitch = 128;
-  }, 800);
+    droneState.throttle = 128;
+    droneState.yaw = 128;
+  }, 900);
 }
 
 // ----------------- WebSocket Handlers ----------------- //

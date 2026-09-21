@@ -322,16 +322,7 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 drone_state.is_gyro_correction = True
                 asyncio.create_task(_reset_flag_delayed("gyro", 2.0))
             elif action == "flip_360":
-                direction = msg.get("direction", "forward")
-                if direction == "left": drone_state.roll = 1
-                elif direction == "right": drone_state.roll = 255
-                elif direction == "forward": drone_state.pitch = 255
-                elif direction == "backward": drone_state.pitch = 1
-                else: drone_state.pitch = 255
-                drone_state.is_circle_turn_end = True
-                send_drone_udp(bytes([0x07, 0x01]))
-                send_drone_udp(bytes([0x08, 0x01]))
-                asyncio.create_task(_reset_flip_delayed(0.8))
+                asyncio.create_task(_trigger_flip_two_stage(msg.get("direction", "forward")))
             elif action == "toggle_headless":
                 drone_state.is_no_head_mode = not drone_state.is_no_head_mode
             elif action == "toggle_altitude_hold":
@@ -368,11 +359,35 @@ async def _reset_flag_delayed(flag_name: str, delay: float):
     elif flag_name == "gyro":
         drone_state.is_gyro_correction = False
 
-async def _reset_flip_delayed(delay: float):
-    await asyncio.sleep(delay)
+async def _trigger_flip_two_stage(direction: str):
+    dir_str = (direction or "forward").lower()
+
+    # Stage 1: Arm flip mode (0x08 bit ON, sticks neutral) for 250ms pre-flip climb
+    drone_state.is_circle_turn_end = True
+    drone_state.roll = 128
+    drone_state.pitch = 128
+    drone_state.throttle = 128
+    drone_state.yaw = 128
+
+    send_drone_udp(bytes([0x07, 0x01]))
+    send_drone_udp(bytes([0x08, 0x01]))
+
+    await asyncio.sleep(0.25)  # 250ms flip arming & pre-climb
+
+    # Stage 2: Apply directional stick deflection for 650ms
+    if dir_str == "left": drone_state.roll = 1
+    elif dir_str == "right": drone_state.roll = 255
+    elif dir_str == "backward": drone_state.pitch = 1
+    else: drone_state.pitch = 255  # Default FORWARD flip
+
+    await asyncio.sleep(0.65)  # 650ms flip rotation
+
+    # Stage 3: Reset to neutral hover
     drone_state.is_circle_turn_end = False
     drone_state.roll = 128
     drone_state.pitch = 128
+    drone_state.throttle = 128
+    drone_state.yaw = 128
 
 @app.websocket("/ws/video")
 async def websocket_video_endpoint(websocket: WebSocket):

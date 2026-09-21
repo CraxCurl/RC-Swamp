@@ -24,7 +24,7 @@ class MissionRunner {
       yawDegPerSec: 130.0,     // Yaw rotation rate (180° = 1.4s)
       takeoffDurationSec: 3.0, // 3.0s climb wait for firmware altitude hold to lock
       landDurationSec: 2.5,    // Touchdown duration
-      flipDurationSec: 1.8,    // Stunt flip time & hover stabilization
+      flipDurationSec: 2.2,    // Stunt flip time & hover stabilization
       minStepDurationSec: 0.4,
       settleDelaySec: 0.0      // 0.0s = Zero stabilization delay between steps
     };

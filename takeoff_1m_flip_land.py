@@ -75,7 +75,7 @@ def run_takeoff_1m_flip_land_mission():
         print("\n[3/4] 🔄 Step 3: Triggering 360° Forward Stunt Flip...")
         if not send_command(action="flip_360", direction="forward", gear=3):
             print("[!] Flip command failed.")
-        time.sleep(1.8)  # Wait for flip execution and hover stabilization
+        time.sleep(2.2)  # Wait for 2-stage flip execution and hover stabilization
 
         # STEP 4: Land Smoothly
         print("\n[4/4] 🛬 Step 4: Landing drone smoothly...")
