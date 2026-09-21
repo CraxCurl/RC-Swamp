@@ -17,64 +17,27 @@ class MissionRunner {
     this.obstacleDetected = false;
     this.obstacleZone = 'CLEAR';
     this.obstacleScore = 0;
-    
-    // Flight Calibration: 100% Speed with Extended Stabilization Windows
+        // Flight Calibration: 100% Speed with Zero Stabilization Delays
     this.calibration = {
       speedCmPerSec: 65.0,     // Linear travel speed in Gear 3 (100% Speed)
-      stickDeflection: 85,     // 100% deflection magnitude (128 +/- 85 -> 213 / 43)
-      yawDegPerSec: 120.0,     // Yaw rotation rate
-      takeoffDurationSec: 4.5, // Generous takeoff climb & altitude-lock stabilization
-      landDurationSec: 3.5,    // Smooth touchdown duration
-      flipDurationSec: 1.5,    // Stunt flip time
-      minStepDurationSec: 0.6,
-      settleDelaySec: 1.0      // 1.0s generous neutral hover pause for optical flow lock between steps
+      stickDeflection: 95,     // 100% deflection magnitude for crisp rotation
+      yawDegPerSec: 130.0,     // Yaw rotation rate (180° = 1.4s)
+      takeoffDurationSec: 3.0, // 3.0s climb wait for firmware altitude hold to lock
+      landDurationSec: 2.5,    // Touchdown duration
+      flipDurationSec: 1.8,    // Stunt flip time & hover stabilization
+      minStepDurationSec: 0.4,
+      settleDelaySec: 0.0      // 0.0s = Zero stabilization delay between steps
     };
 
     this.presets = {
-      custom_request: `# Demo: 50cm Forward -> Stabilize -> Right 50cm -> Stabilize -> 20cm Forward -> Land
+      takeoff_50cm_land: `# Mission: Takeoff to 50cm -> Turn 180° -> Land
 TAKEOFF
-HOVER 3.0
-FORWARD 50
-HOVER 2.0
-RIGHT 50
-HOVER 2.0
-FORWARD 20
-HOVER 3.0
+YAW 180
 LAND`,
-
-      square_patrol: `# Demo: Precision Square Patrol Box (40cm x 40cm)
+      takeoff_1m_flip_land: `# Mission: Takeoff to 1m -> 360° Stunt Flip -> Land
 TAKEOFF
-HOVER 3.0
-FORWARD 40
-HOVER 1.5
-RIGHT 40
-HOVER 1.5
-BACKWARD 40
-HOVER 1.5
-LEFT 40
-HOVER 2.5
-LAND`,
-
-      smooth_scout: `# Demo: Extended Stabilization Flight
-TAKEOFF
-HOVER 3.0
-FORWARD 60
-HOVER 2.0
-YAW 90
-HOVER 2.0
-FORWARD 40
-HOVER 3.0
-LAND`,
-
-      stunt_flip: `# Demo: Takeoff, Stabilize, 360 Spin, Flip & Land
-TAKEOFF
-HOVER 3.0
-UP 30
-HOVER 1.5
-YAW 360
-HOVER 2.0
-FLIP BACKWARD
-HOVER 3.0
+UP 50
+FLIP FORWARD
 LAND`
     };
 
@@ -126,12 +89,21 @@ LAND`
       });
     }
 
-    // Load saved or default script
-    const saved = localStorage.getItem('drone_custom_script');
-    if (saved && this.scriptEditor) {
-      this.scriptEditor.value = saved;
-    } else if (this.scriptEditor && this.presets.custom_request) {
-      this.scriptEditor.value = this.presets.custom_request;
+    // Quick Command Chip Inserters
+    document.querySelectorAll('.cmd-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const cmdToAdd = chip.getAttribute('data-cmd');
+        if (!cmdToAdd || !this.scriptEditor) return;
+        const currentVal = this.scriptEditor.value.trim();
+        this.scriptEditor.value = currentVal ? `${currentVal}\n${cmdToAdd}` : cmdToAdd;
+        this.parseScript();
+        this.log(`Added command '${cmdToAdd}' to flight script.`, "info");
+      });
+    });
+
+    // Always default to the Takeoff to 50cm & Land preset
+    if (this.scriptEditor && this.presets.takeoff_50cm_land) {
+      this.scriptEditor.value = this.presets.takeoff_50cm_land;
     }
 
     if (this.scriptEditor) {
@@ -217,9 +189,9 @@ LAND`
           break;
         case 'YAW':
         case 'ROTATE':
-          const deg = parseFloat(arg1) || 90;
+          const deg = parseFloat(arg1) || 180;
           duration = Math.max(0.5, Math.abs(deg) / this.calibration.yawDegPerSec);
-          description = `Rotate Yaw ${deg}° (${duration.toFixed(1)}s @ 100% Speed)`;
+          description = `Rotate Yaw Right ${deg}° (${duration.toFixed(1)}s @ 100% Speed)`;
           break;
         case 'FLIP':
           duration = this.calibration.flipDurationSec;
@@ -322,7 +294,7 @@ LAND`
     const durationMs = step.duration * 1000;
 
     this.stepTimer = setTimeout(() => {
-      // Settle into neutral hover for 1.0s before moving to next step
+      // Settle into neutral hover for 0.0s before moving to next step
       this.settleNeutral(() => {
         this.currentStepIndex++;
         this.executeCurrentStep();
@@ -380,6 +352,17 @@ LAND`
       this.app.droneState[axisName] = currentVal;
       if (this.app.updateFlightChannels) this.app.updateFlightChannels();
 
+      fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roll: this.app.droneState.roll,
+          pitch: this.app.droneState.pitch,
+          throttle: this.app.droneState.throttle,
+          yaw: this.app.droneState.yaw
+        })
+      }).catch(() => {});
+
       if (elapsed >= totalMs) {
         clearInterval(this.rampInterval);
         this.rampInterval = null;
@@ -395,9 +378,6 @@ LAND`
     // Reset sticks to neutral hover
     app.droneState.roll = 128;
     app.droneState.pitch = 128;
-    app.droneState.throttle = 128;
-    app.droneState.yaw = 128;
-
     const defl = this.calibration.stickDeflection;
 
     switch (step.cmd) {

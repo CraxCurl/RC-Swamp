@@ -668,10 +668,8 @@
             <div class="mission-selector-group">
               <label class="v-label">Preset Mission:</label>
               <select id="mission-preset-select" class="v-select">
-                <option value="custom_request">Demo: 50cm Fwd &rarr; 50cm Right &rarr; 20cm Fwd &rarr; Land</option>
-                <option value="square_patrol">Demo: Square Patrol Box (40cm x 40cm)</option>
-                <option value="obstacle_scout">Demo: Vision Obstacle Avoidance Scout</option>
-                <option value="stunt_flip">Demo: Takeoff, 360 Spin, Flip & Land</option>
+                <option value="takeoff_50cm_land" selected>Takeoff to 50cm, Turn 180&deg; &amp; Land</option>
+                <option value="takeoff_1m_flip_land">Takeoff to 1m, 360&deg; Flip &amp; Land</option>
               </select>
             </div>
 
@@ -696,7 +694,16 @@
             <div class="mission-editor-panel">
               <div class="panel-header">
                 <span>Flight Script (DSL Editor)</span>
-                <span class="editor-syntax-help">TAKEOFF | LAND | FORWARD &lt;cm&gt; | RIGHT &lt;cm&gt; | HOVER &lt;sec&gt;</span>
+                <span class="editor-syntax-help">TAKEOFF | LAND | UP <cm> | FLIP FORWARD | YAW 180</span>
+              </div>
+              <div class="cmd-chips-bar">
+                <span class="chips-label">Quick Add:</span>
+                <button type="button" class="cmd-chip" data-cmd="TAKEOFF">+ TAKEOFF</button>
+                <button type="button" class="cmd-chip" data-cmd="UP 50">+ UP 50cm (1m)</button>
+                <button type="button" class="cmd-chip" data-cmd="FLIP FORWARD">+ FLIP 360°</button>
+                <button type="button" class="cmd-chip" data-cmd="YAW 180">+ YAW 180°</button>
+                <button type="button" class="cmd-chip" data-cmd="FORWARD 50">+ FORWARD 50cm</button>
+                <button type="button" class="cmd-chip" data-cmd="LAND">+ LAND</button>
               </div>
               <textarea id="mission-script-editor" class="mission-textarea" spellcheck="false" placeholder="# Enter flight commands..."></textarea>
               <div class="editor-actions">
@@ -717,13 +724,63 @@
               </div>
 
               <div class="panel-header" style="margin-top: 10px;">
-                <span>Mission & Vision Log</span>
+                <span>Mission &amp; Vision Log</span>
               </div>
               <div id="mission-log" class="mission-log-box">
                 <div class="mission-log-line log-info">[System] Autonomous Mission Engine initialized. Ready to fly.</div>
               </div>
             </div>
           </div>
+
+          <!-- BOTTOM: INTERACTIVE FLIGHT SCRIPT COMMAND GUIDE & DICTIONARY -->
+          <details class="script-guide-accordion" open>
+            <summary class="script-guide-summary">
+              <span>📖 Flight Script Commands Reference Guide (Click to Toggle)</span>
+              <span class="guide-toggle-hint">All 11 Commands &amp; Parameters</span>
+            </summary>
+            <div class="script-guide-grid">
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>TAKEOFF</code></div>
+                <div class="cmd-desc">Triggers auto-takeoff. Drone climbs and locks hover at <b>~50 cm altitude</b> (3s stabilization).</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>LAND</code></div>
+                <div class="cmd-desc">Initiates auto-landing. Smoothly descends and cuts motor power.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>UP &lt;cm&gt;</code></div>
+                <div class="cmd-desc">Ascends vertically by <code>&lt;cm&gt;</code> centimeters. E.g. <code>UP 50</code> reaches <b>1 metre altitude</b>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>DOWN &lt;cm&gt;</code></div>
+                <div class="cmd-desc">Descends vertically by <code>&lt;cm&gt;</code> centimeters. E.g. <code>DOWN 30</code>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>FLIP &lt;dir&gt;</code></div>
+                <div class="cmd-desc">Performs 360° stunt flip. Options: <code>FORWARD</code>, <code>BACKWARD</code>, <code>LEFT</code>, <code>RIGHT</code>. E.g. <code>FLIP FORWARD</code>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>YAW &lt;deg&gt;</code></div>
+                <div class="cmd-desc">Rotates heading by <code>&lt;deg&gt;</code> degrees. E.g. <code>YAW 180</code> turns 180° right.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>FORWARD &lt;cm&gt;</code></div>
+                <div class="cmd-desc">Flies forward by <code>&lt;cm&gt;</code> centimeters at 100% speed. E.g. <code>FORWARD 50</code>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>BACKWARD &lt;cm&gt;</code></div>
+                <div class="cmd-desc">Flies backward by <code>&lt;cm&gt;</code> centimeters. E.g. <code>BACKWARD 40</code>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>LEFT &lt;cm&gt; / RIGHT &lt;cm&gt;</code></div>
+                <div class="cmd-desc">Strafes left or right horizontally by <code>&lt;cm&gt;</code> centimeters. E.g. <code>LEFT 30</code>.</div>
+              </div>
+              <div class="guide-cmd-card">
+                <div class="cmd-title"><code>HOVER &lt;sec&gt; / WAIT</code></div>
+                <div class="cmd-desc">Holds stable optical flow hover position for <code>&lt;sec&gt;</code> seconds. E.g. <code>HOVER 2.5</code>.</div>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>

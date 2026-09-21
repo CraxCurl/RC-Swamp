@@ -1,0 +1,5 @@
+# Mission: Takeoff to 1m -> 360° Stunt Flip -> Land
+TAKEOFF
+UP 50
+FLIP FORWARD
+LAND

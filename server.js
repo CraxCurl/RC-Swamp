@@ -55,6 +55,9 @@ const droneState = {
   yawTrim: 0,
   gear: 2, // 1: 30%, 2: 60%, 3: 100%
   cameraId: 1, // 1: Front, 2: Bottom
+  isFlipping: false,
+  lastRtspTime: 0,
+  lastUdpVideoTime: 0,
 
   // Telemetry & Diagnostics
   packetsSent: 0,
@@ -124,6 +127,23 @@ function saveFrameToDisk(buffer, label = 'frame') {
 function broadcastVideoFrame(buffer, source = 'STREAM') {
   if (!buffer || buffer.length < 100) return;
   const now = Date.now();
+
+  const isRtsp = source === 'PyAV-RTSP';
+  const selectedCam = droneState.cameraId || 1;
+
+  // Manual camera stream lock: change stream ONLY when user manually switches lens
+  if (selectedCam === 1) {
+    if (!isRtsp && droneState.lastRtspTime && (now - droneState.lastRtspTime < 3000)) {
+      return; // Lock to Front RTSP stream when active
+    }
+    if (isRtsp) droneState.lastRtspTime = now;
+  } else if (selectedCam === 2) {
+    if (isRtsp && droneState.lastUdpVideoTime && (now - droneState.lastUdpVideoTime < 3000)) {
+      return; // Lock to Bottom UDP stream when active
+    }
+    if (!isRtsp) droneState.lastUdpVideoTime = now;
+  }
+
   droneState.hasLiveVideo = true;
   droneState.lastVideoTime = now;
   droneState.videoFramesCount++;
@@ -142,8 +162,8 @@ function broadcastVideoFrame(buffer, source = 'STREAM') {
 
   if (videoClients.size === 0) return;
   for (const client of videoClients) {
-    // Zero-lag queueing: Only send if client buffer is clear
-    if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 4096) {
+    // Zero-lag queueing: Send if client socket buffer is under 128 KB backpressure limit
+    if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 128 * 1024) {
       client.send(buffer, { binary: true });
     }
   }
@@ -290,7 +310,7 @@ class UdpMjpegReassembler {
 
 const controlSocketReassembler = new UdpMjpegReassembler('7099');
 
-const videoUdpPorts = [8888, 8080, 7070, 7060, 50000, 5000];
+const videoUdpPorts = [7099, 7098, 7070, 7060, 8888, 8080, 8554, 9000, 50000, 5000];
 videoUdpPorts.forEach(port => {
   try {
     const reasm = new UdpMjpegReassembler(port.toString());
@@ -304,10 +324,16 @@ videoUdpPorts.forEach(port => {
 });
 
 // ----------------- 3. UDP Control Socket & Protocol ----------------- //
-const udpClient = dgram.createSocket('udp4');
+const udpClient = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
 udpClient.on('error', (err) => {
   console.warn('[UDP Warning]', err.message);
+});
+
+udpClient.on('message', (msg) => {
+  droneState.packetsReceived++;
+  droneState.connected = true;
+  controlSocketReassembler.feedPacket(msg);
 });
 
 function sendDroneUdp(buffer) {
@@ -435,6 +461,29 @@ udpClient.on('message', (msg, rinfo) => {
   }
 });
 
+function triggerFlip360(direction = 'right') {
+  const dir = (direction || 'right').toLowerCase();
+  droneState.isFlipping = true;
+  droneState.isCircleTurnEnd = true;
+
+  if (dir === 'left') droneState.roll = 1;
+  else if (dir === 'right') droneState.roll = 255;
+  else if (dir === 'forward') droneState.pitch = 255;
+  else if (dir === 'backward') droneState.pitch = 1;
+  else droneState.pitch = 255;
+
+  sendDroneUdp(Buffer.from([0x07, 0x01]));
+  sendDroneUdp(Buffer.from([0x08, 0x01]));
+  sendFlightPacketBurst(5);
+
+  setTimeout(() => {
+    droneState.isFlipping = false;
+    droneState.isCircleTurnEnd = false;
+    droneState.roll = 128;
+    droneState.pitch = 128;
+  }, 800);
+}
+
 // ----------------- WebSocket Handlers ----------------- //
 wssTelemetry.on('connection', (ws) => {
   telemetryClients.add(ws);
@@ -475,18 +524,7 @@ wssTelemetry.on('connection', (ws) => {
         sendFlightPacketBurst(3);
         setTimeout(() => { droneState.isGyroCorrection = false; }, 2000);
       } else if (msg.action === 'flip_360') {
-        const dir = msg.direction || 'right';
-        if (dir === 'left') droneState.roll = 1;
-        else if (dir === 'right') droneState.roll = 255;
-        else if (dir === 'forward') droneState.pitch = 255;
-        else if (dir === 'backward') droneState.pitch = 1;
-        droneState.isCircleTurnEnd = true;
-        sendFlightPacketBurst(3);
-        setTimeout(() => {
-          droneState.isCircleTurnEnd = false;
-          droneState.roll = 128;
-          droneState.pitch = 128;
-        }, 600);
+        triggerFlip360(msg.direction);
       } else if (msg.action === 'toggle_headless') {
         droneState.isNoHeadMode = !droneState.isNoHeadMode;
         sendFlightPacketBurst(2);
@@ -497,6 +535,8 @@ wssTelemetry.on('connection', (ws) => {
         droneState.gear = msg.gear;
       } else if (msg.action === 'switch_camera') {
         droneState.cameraId = msg.camera_id;
+        droneState.lastRtspTime = 0;
+        droneState.lastUdpVideoTime = 0;
         sendDroneUdp(Buffer.from([0x06, msg.camera_id]));
       } else if (msg.action === 'set_trims') {
         droneState.rollTrim = msg.roll_trim;
@@ -608,11 +648,24 @@ app.use('/camera_data', express.static(FRAMES_DIR));
 
 // 0. REST Control API (for Autonomous Python Mission Scripts & Web clients)
 app.post('/api/control', (req, res) => {
-  const { roll, pitch, throttle, yaw, take_off, land, emergency, flags } = req.body;
-  if (typeof roll === 'number') droneState.roll = Math.max(0, Math.min(255, roll));
-  if (typeof pitch === 'number') droneState.pitch = Math.max(0, Math.min(255, pitch));
+  const { roll, pitch, throttle, yaw, take_off, land, emergency, flags, action, direction, camera_id } = req.body;
+
+  if (!droneState.isFlipping) {
+    if (typeof roll === 'number') droneState.roll = Math.max(0, Math.min(255, roll));
+    if (typeof pitch === 'number') droneState.pitch = Math.max(0, Math.min(255, pitch));
+  }
   if (typeof throttle === 'number') droneState.throttle = Math.max(0, Math.min(255, throttle));
   if (typeof yaw === 'number') droneState.yaw = Math.max(0, Math.min(255, yaw));
+
+  if (action === 'flip_360') {
+    triggerFlip360(direction || 'forward');
+  } else if (action === 'switch_camera') {
+    const camId = camera_id || (droneState.cameraId === 1 ? 2 : 1);
+    droneState.cameraId = camId;
+    droneState.lastRtspTime = 0;
+    droneState.lastUdpVideoTime = 0;
+    sendDroneUdp(Buffer.from([0x06, camId]));
+  }
 
   if (take_off) {
     droneState.isFastFly = true;

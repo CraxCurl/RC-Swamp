@@ -20,19 +20,13 @@ API_CONTROL = f"{GCS_HOST}/api/control"
 API_FRAME = f"{GCS_HOST}/api/camera-frame"
 
 DEFAULT_SCRIPT = """
-# Mission: 50cm Forward -> Stabilize -> Right 50cm -> Stabilize -> 20cm Forward -> Land
+# Mission: Takeoff to 50cm -> Hover 1.0s -> Land
 TAKEOFF
-HOVER 3.0
-FORWARD 50
-HOVER 2.0
-RIGHT 50
-HOVER 2.0
-FORWARD 20
-HOVER 3.0
+HOVER 1.0
 LAND
 """
 
-def send_flight_command(roll=128, pitch=128, throttle=128, yaw=128, flags=0, take_off=False, land=False, emergency=False, gear=3):
+def send_flight_command(roll=128, pitch=128, throttle=128, yaw=128, flags=0, take_off=False, land=False, emergency=False, action=None, direction=None, gear=3):
     payload = {
         "roll": int(roll),
         "pitch": int(pitch),
@@ -44,6 +38,10 @@ def send_flight_command(roll=128, pitch=128, throttle=128, yaw=128, flags=0, tak
         "flags": int(flags),
         "gear": int(gear)
     }
+    if action:
+        payload["action"] = action
+    if direction:
+        payload["direction"] = direction
     try:
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(API_CONTROL, data=data, headers={'Content-Type': 'application/json'}, method='POST')
@@ -124,9 +122,8 @@ def run_script(script_text):
         if cmd == "TAKEOFF":
             print("  --> Triggering Auto-Takeoff (Climbing to 1.2m hover + 4.5s stabilization)...")
             send_flight_command(take_off=True, gear=3)
-            time.sleep(4.5)
+            time.sleep(3.0)
             send_flight_command(128, 128, 128, 128, gear=3)
-            time.sleep(1.0)
 
         elif cmd == "LAND":
             print("  --> Triggering Smooth Auto-Land (3.5s)...")
@@ -183,6 +180,12 @@ def run_script(script_text):
             duration = max(0.6, distance_cm / (speed_cm_per_sec * 0.8))
             print(f"  --> Descending {distance_cm} cm...")
             smooth_ramp_execute('throttle', max(0, 128 - stick_defl), duration)
+
+        elif cmd == "FLIP":
+            flip_dir = parts[1].lower() if len(parts) > 1 else "forward"
+            print(f"  --> Executing 360° Stunt Flip ({flip_dir.upper()})...")
+            send_flight_command(action="flip_360", direction=flip_dir, gear=3)
+            time.sleep(1.8)
 
     print("\n" + "=" * 65)
     print("✅ MISSION COMPLETED SUCCESSFULLY (100% SPEED + STABILIZED)")

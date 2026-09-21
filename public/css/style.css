@@ -1759,3 +1759,109 @@ kbd {
   font-size: 10px;
   color: var(--v-text-muted);
 }
+
+/* Quick Command Chips Bar */
+.cmd-chips-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.chips-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--v-text-muted);
+  text-transform: uppercase;
+}
+
+.cmd-chip {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--v-border-default);
+  color: #a8ff78;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cmd-chip:hover {
+  background: rgba(0, 230, 118, 0.2);
+  border-color: #00e676;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* Script Commands Guide Accordion */
+.script-guide-accordion {
+  background: var(--v-bg-elevated);
+  border: 1px solid var(--v-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.script-guide-summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+.script-guide-summary:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.guide-toggle-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--v-text-muted);
+}
+
+.script-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  padding: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--v-border-subtle);
+}
+
+.guide-cmd-card {
+  background: #000;
+  border: 1px solid var(--v-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.guide-cmd-card .cmd-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e676;
+}
+
+.guide-cmd-card .cmd-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--v-text-secondary);
+}
+
+.guide-cmd-card .cmd-desc b {
+  color: #fff;
+}
+

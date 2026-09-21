@@ -322,13 +322,16 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 drone_state.is_gyro_correction = True
                 asyncio.create_task(_reset_flag_delayed("gyro", 2.0))
             elif action == "flip_360":
-                direction = msg.get("direction", "right")
+                direction = msg.get("direction", "forward")
                 if direction == "left": drone_state.roll = 1
                 elif direction == "right": drone_state.roll = 255
                 elif direction == "forward": drone_state.pitch = 255
                 elif direction == "backward": drone_state.pitch = 1
+                else: drone_state.pitch = 255
                 drone_state.is_circle_turn_end = True
-                asyncio.create_task(_reset_flip_delayed(0.6))
+                send_drone_udp(bytes([0x07, 0x01]))
+                send_drone_udp(bytes([0x08, 0x01]))
+                asyncio.create_task(_reset_flip_delayed(0.8))
             elif action == "toggle_headless":
                 drone_state.is_no_head_mode = not drone_state.is_no_head_mode
             elif action == "toggle_altitude_hold":

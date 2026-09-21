@@ -205,36 +205,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function initVideoWebSocket() {
     videoWs = new WebSocket(videoWsUrl);
-    videoWs.binaryType = 'blob';
+    videoWs.binaryType = 'arraybuffer';
 
     let isFrameDecoding = false;
-    let newestBlob = null;
+    let newestData = null;
 
     videoWs.onmessage = (event) => {
-      newestBlob = event.data;
-      if (isFrameDecoding) return; // Drop intermediate queue, only decode freshest frame
+      newestData = event.data;
+      if (isFrameDecoding) return; // Always keep processing freshest buffer
 
       isFrameDecoding = true;
-      const blobToDecode = newestBlob;
-      newestBlob = null;
+      const dataToDecode = newestData;
+      newestData = null;
 
-      createImageBitmap(blobToDecode).then((imgBitmap) => {
+      const blob = (dataToDecode instanceof Blob) ? dataToDecode : new Blob([dataToDecode], { type: 'image/jpeg' });
+      createImageBitmap(blob).then((imgBitmap) => {
         const old = latestDroneBitmap;
         latestDroneBitmap = imgBitmap;
-        if (old) {
-          old.close();
-        }
+        if (old) old.close();
         lastDroneFrameTime = performance.now();
         state.hasLiveVideo = true;
         frameCount++;
         isFrameDecoding = false;
 
-        // If another frame arrived while decoding, process the absolute latest immediately
-        if (newestBlob) {
-          const next = newestBlob;
-          newestBlob = null;
+        if (newestData) {
+          const nextData = newestData;
+          newestData = null;
           isFrameDecoding = true;
-          createImageBitmap(next).then((bm) => {
+          const nextBlob = (nextData instanceof Blob) ? nextData : new Blob([nextData], { type: 'image/jpeg' });
+          createImageBitmap(nextBlob).then((bm) => {
             const prev = latestDroneBitmap;
             latestDroneBitmap = bm;
             if (prev) prev.close();
@@ -343,18 +342,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const cleanYaw = deadband(applyExpo(state.axisYaw));
     const cleanThrottle = deadband(applyExpo(state.axisThrottle));
 
-    // Right Stick: Roll (X) & Pitch (Y)
-    let r = Math.round(128 + (cleanRoll * state.halfLen) + (state.rollTrim * state.trimMultiplier));
-    let p = Math.round(128 + (cleanPitch * state.halfLen) + (state.pitchTrim * state.trimMultiplier));
+    const isUserTouch = (cleanRoll !== 0 || cleanPitch !== 0 || cleanYaw !== 0 || cleanThrottle !== 0);
 
-    // Left Stick: Throttle (Y) & Yaw (X)
-    let t = Math.round(128 + (cleanThrottle * 127.0));
-    let y = Math.round(128 + (cleanYaw * 127.0) + (state.yawTrim * 4));
+    if (isUserTouch || !missionRunner || !missionRunner.isRunning) {
+      let r = Math.round(128 + (cleanRoll * state.halfLen) + (state.rollTrim * state.trimMultiplier));
+      let p = Math.round(128 + (cleanPitch * state.halfLen) + (state.pitchTrim * state.trimMultiplier));
+      let t = Math.round(128 + (cleanThrottle * 127.0));
+      let y = Math.round(128 + (cleanYaw * 127.0) + (state.yawTrim * 4));
 
-    state.roll = Math.max(1, Math.min(255, r));
-    state.pitch = Math.max(1, Math.min(255, p));
-    state.throttle = Math.max(0, Math.min(255, t));
-    state.yaw = Math.max(1, Math.min(255, y));
+      state.roll = Math.max(1, Math.min(255, r));
+      state.pitch = Math.max(1, Math.min(255, p));
+      state.throttle = Math.max(0, Math.min(255, t));
+      state.yaw = Math.max(1, Math.min(255, y));
+    }
 
     sendCommand({
       action: 'stick',
