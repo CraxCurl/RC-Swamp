@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>RC UFO GCS — Autonomous & FPV Ground Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="vercel-theme">
+  <div id="app" class="app-container">
+    
+    <!-- VERCEL TOP NAVBAR / TELEMETRY DECK -->
+    <header class="v-header">
+      <div class="v-header-left">
+        <div class="v-brand">
+          <svg class="v-logo-icon" width="18" height="18" viewBox="0 0 76 65" fill="none">
+            <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" fill="#FFFFFF"/>
+          </svg>
+          <span class="v-brand-title">RC UFO <span class="v-badge">GCS 2.0</span></span>
+        </div>
+
+        <div class="v-divider"></div>
+
+        <!-- Connection Status Indicator -->
+        <div id="connectionStatus" class="v-status-pill standby">
+          <span class="v-status-pulse"></span>
+          <span id="connectionText" class="v-status-label">STANDBY / SEARCHING...</span>
+        </div>
+
+        <div class="v-tag v-tag-mono" id="protocolBadge">GL-21B</div>
+      </div>
+
+      <!-- Telemetry Center Metrics -->
+      <div class="v-header-center">
+        <div class="v-metric-item">
+          <span class="v-metric-label">STREAM FPS</span>
+          <span id="fpsValue" class="v-metric-val">0</span>
+        </div>
+        <div class="v-metric-item">
+          <span class="v-metric-label">LATENCY</span>
+          <span id="latencyValue" class="v-metric-val">-- ms</span>
+        </div>
+        <div class="v-metric-item">
+          <span class="v-metric-label">FRAMES SAVED</span>
+          <span id="savedFramesStat" class="v-metric-val highlight">0</span>
+        </div>
+        <div class="v-metric-item">
+          <span class="v-metric-label">RATE</span>
+          <span id="gearBadge" class="v-metric-val highlight">60%</span>
+        </div>
+      </div>
+
+      <!-- Header Action Controls -->
+      <div class="v-header-right">
+        <button id="btnMissions" class="v-btn v-btn-primary" title="Autonomous Flight Script Runner & Obstacle Avoidance [M]">
+          <span class="v-btn-icon">⚡</span>
+          <span class="v-btn-text">AUTO MISSIONS</span>
+        </button>
+        <button id="btnImagesStudio" class="v-btn v-btn-secondary" title="Image Processing & Export Studio [P]">
+          <span class="v-btn-icon">🖼️</span>
+          <span class="v-btn-text">IMAGES / DATA</span>
+        </button>
+        <button id="btnGuide" class="v-btn v-btn-secondary" title="Flight Controls & Button Manual">
+          <span class="v-btn-icon">📖</span>
+          <span class="v-btn-text">GUIDE</span>
+        </button>
+        <button id="btnSnapshot" class="v-btn v-btn-ghost" title="Capture High-Res Snapshot to Disk [P]">
+          <span class="v-btn-icon">📷</span>
+        </button>
+        <button id="btnRecord" class="v-btn v-btn-ghost" title="Record FPV Stream">
+          <span class="v-btn-icon">⏺️</span>
+          <span id="recDot" class="rec-dot hide"></span>
+        </button>
+        <button id="btnVoice" class="v-btn v-btn-ghost active" title="Toggle Voice Alerts">
+          <span class="v-btn-icon">🔊</span>
+        </button>
+        <button id="btnSettings" class="v-btn v-btn-ghost" title="Network & Drone Settings">
+          <span class="v-btn-icon">⚙️</span>
+        </button>
+        <button id="btnFullscreen" class="v-btn v-btn-ghost" title="Fullscreen HUD">
+          <span class="v-btn-icon">⛶</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- FLIGHT ACTION COMMAND BAR -->
+    <nav class="v-actions-bar">
+      <div class="v-action-group">
+        <button id="btnTakeoff" class="v-action-btn v-action-takeoff" title="One-Key Automatic Takeoff [SPACE]">
+          <span class="btn-icon">🛫</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">TAKEOFF</span>
+            <span class="btn-sub">[SPACE]</span>
+          </div>
+        </button>
+
+        <button id="btnLand" class="v-action-btn v-action-land" title="One-Key Automatic Descent & Landing [SHIFT]">
+          <span class="btn-icon">🛬</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">LAND</span>
+            <span class="btn-sub">[SHIFT]</span>
+          </div>
+        </button>
+      </div>
+
+      <div class="v-action-group">
+        <div class="v-dropdown-wrap">
+          <button id="btnFlipMenu" class="v-action-btn v-action-stunt" title="Execute 360° Aerial Stunt Flip">
+            <span class="btn-icon">🔄</span>
+            <div class="btn-text-wrap">
+              <span class="btn-main">360° FLIP</span>
+              <span class="btn-sub">STUNT [F]</span>
+            </div>
+          </button>
+          <div id="flipDropdown" class="v-flip-menu hide">
+            <button data-flip="left" class="v-menu-item">
+              <span class="menu-arrow">←</span> Left Barrel Roll
+            </button>
+            <button data-flip="right" class="v-menu-item">
+              <span class="menu-arrow">→</span> Right Barrel Roll
+            </button>
+            <button data-flip="forward" class="v-menu-item">
+              <span class="menu-arrow">↑</span> Front Somersault
+            </button>
+            <button data-flip="backward" class="v-menu-item">
+              <span class="menu-arrow">↓</span> Back Flip
+            </button>
+          </div>
+        </div>
+
+        <button id="btnAltHold" class="v-action-btn v-action-toggle active" title="Barometric Altitude Hold Mode">
+          <span class="btn-icon">⚓</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">ALT HOLD</span>
+            <span id="altHoldStatus" class="btn-sub status-on">ACTIVE</span>
+          </div>
+        </button>
+
+        <button id="btnHeadless" class="v-action-btn v-action-toggle" title="Headless Flight Orientation Mode">
+          <span class="btn-icon">🧭</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">HEADLESS</span>
+            <span id="headlessStatus" class="btn-sub status-off">INACTIVE</span>
+          </div>
+        </button>
+
+        <button id="btnCamSwitch" class="v-action-btn v-action-toggle" title="Switch Dual Camera Lens (Front / Bottom) [C]">
+          <span class="btn-icon">📷</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">LENS: <span id="camIdText">FRONT</span></span>
+            <span class="btn-sub">TOGGLE [C]</span>
+          </div>
+        </button>
+
+        <button id="btnGyro" class="v-action-btn v-action-gyro" title="Recalibrate 6-Axis Gyroscope Sensors [G]">
+          <span class="btn-icon">⚖️</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">CALIBRATE</span>
+            <span class="btn-sub">GYRO [G]</span>
+          </div>
+        </button>
+      </div>
+
+      <div class="v-action-group end">
+        <button id="btnEmergency" class="v-action-btn v-action-emergency" title="Emergency Cut Power to All 4 Motors [ESC]">
+          <span class="btn-icon">🛑</span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">EMERGENCY STOP</span>
+            <span class="btn-sub">CUT MOTORS [ESC]</span>
+          </div>
+        </button>
+      </div>
+    </nav>
+
+    <!-- MAIN FPV VIEWPORT -->
+    <main class="v-viewport" id="viewport">
+      
+      <!-- Video Stream Canvas (Strictly for Drone Camera Stream) -->
+      <canvas id="videoCanvas" class="v-video-canvas"></canvas>
+      
+      <!-- Artificial Horizon & Flight Instruments Layer -->
+      <canvas id="hudCanvas" class="v-hud-canvas"></canvas>
+
+      <!-- STANDBY OVERLAY: AWAITING DRONE CAMERA -->
+      <div id="standbyOverlay" class="v-standby-screen">
+        <div class="v-standby-card">
+          <div class="v-standby-badge">
+            <span class="v-pulse-dot"></span>
+            <span>AWAITING DRONE CAMERA FEED</span>
+          </div>
+
+          <h2 class="v-standby-title">Connect to Drone Wi-Fi to View Live Camera</h2>
+          <p class="v-standby-desc">
+            The Ground Station is listening for live video from the drone's RTSP endpoint (<code id="dispRtspUrl">rtsp://192.168.1.1:7070/webcam</code>) and multi-port UDP stream.
+          </p>
+
+          <div class="v-steps-grid">
+            <div class="v-step-card">
+              <div class="step-num">01</div>
+              <div class="step-content">
+                <span class="step-heading">Power On Drone</span>
+                <span class="step-detail">Place on a flat, level surface until drone LEDs blink.</span>
+              </div>
+            </div>
+
+            <div class="v-step-card">
+              <div class="step-num">02</div>
+              <div class="step-content">
+                <span class="step-heading">Join Drone Wi-Fi</span>
+                <span class="step-detail">Connect your PC Wi-Fi to <code>KY-WiFi-xxxx</code>, <code>WiFi-xxxx</code>, or <code>4K-WiFi-xxxx</code>.</span>
+              </div>
+            </div>
+
+            <div class="v-step-card">
+              <div class="step-num">03</div>
+              <div class="step-content">
+                <span class="step-heading">Stream Connects Automatically</span>
+                <span class="step-detail">Telemetry and live FPV video will appear instantly on this screen.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="v-standby-footer">
+            <div class="v-diagnostic-info">
+              <span>Target IP: <b id="dispDroneIp">192.168.1.1</b></span>
+              <span>UDP Port: <b>7099</b></span>
+              <span>Link Status: <b id="dispLinkStatus" class="text-amber">Awaiting Handshake</b></span>
+            </div>
+            <div class="v-standby-actions">
+              <button id="btnOpenGuideFromStandby" class="v-btn v-btn-secondary">
+                📖 View Controls Guide
+              </button>
+              <button id="btnOpenSettingsFromStandby" class="v-btn v-btn-ghost">
+                ⚙️ Network Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FPV HUD TELEMETRY TAPES & NOTIFICATIONS -->
+      <div class="v-hud-overlays">
+        
+        <!-- Throttle Tape (Left) -->
+        <div class="v-tape v-left-tape">
+          <span class="tape-label">THROT</span>
+          <div class="tape-track">
+            <div id="throttleBar" class="tape-indicator" style="height: 50%;"></div>
+          </div>
+          <span id="throttleVal" class="tape-readout">50%</span>
+        </div>
+
+        <!-- Pitch Tape (Right) -->
+        <div class="v-tape v-right-tape">
+          <span class="tape-label">PITCH</span>
+          <div class="tape-track">
+            <div id="pitchBar" class="tape-indicator" style="height: 50%;"></div>
+          </div>
+          <span id="pitchVal" class="tape-readout">0°</span>
+        </div>
+
+        <!-- System Toast Message -->
+        <div id="hudToast" class="v-toast hide">SYSTEM READY</div>
+
+        <!-- Gamepad Indicator -->
+        <div id="gamepadIndicator" class="v-gamepad-badge hide">
+          🎮 GAMEPAD CONTROLLER ACTIVE
+        </div>
+      </div>
+
+      <!-- BOTTOM CONTROL DECK: DUAL JOYSTICKS & TRIMS -->
+      <div class="v-bottom-deck">
+        
+        <!-- LEFT JOYSTICK: THROTTLE & YAW -->
+        <div class="v-stick-col">
+          <div class="v-stick-header">
+            <span class="v-stick-title">THROTTLE / YAW</span>
+            <span class="v-stick-hotkeys">[W, S / A, D]</span>
+          </div>
+          <div class="v-stick-base" id="leftJoystickWrapper">
+            <div class="v-stick-crosshair x-axis"></div>
+            <div class="v-stick-crosshair y-axis"></div>
+            <div class="v-stick-nipple" id="leftJoystickNipple">
+              <div class="nipple-dot"></div>
+            </div>
+          </div>
+          <!-- Yaw Trim -->
+          <div class="v-trim-bar">
+            <button class="v-trim-btn" id="trimYawMinus" title="Trim Yaw Left">◀</button>
+            <span class="v-trim-label">YAW TRIM: <span id="trimYawVal" class="mono">0</span></span>
+            <button class="v-trim-btn" id="trimYawPlus" title="Trim Yaw Right">▶</button>
+          </div>
+        </div>
+
+        <!-- CENTER SPEED GEARS & HOTKEY TIPS -->
+        <div class="v-center-col">
+          <div class="v-gear-card">
+            <div class="v-gear-header">
+              <span class="gear-title">SPEED GEAR (SENSITIVITY)</span>
+              <span class="gear-hotkey">KEY [1, 2, 3]</span>
+            </div>
+            <div class="v-gear-segmented">
+              <button class="v-gear-btn" data-gear="1">30% <span class="gear-name">SLOW</span></button>
+              <button class="v-gear-btn active" data-gear="2">60% <span class="gear-name">STD</span></button>
+              <button class="v-gear-btn" data-gear="3">100% <span class="gear-name">PRO</span></button>
+            </div>
+          </div>
+
+          <div class="v-keys-quickguide">
+            <div class="key-pill"><kbd>WASD</kbd> Throttle/Yaw</div>
+            <div class="key-pill"><kbd>↑↓←→</kbd> Pitch/Roll</div>
+            <div class="key-pill"><kbd>P</kbd> Save Frame</div>
+            <div class="key-pill"><kbd>SPACE</kbd> Takeoff</div>
+          </div>
+        </div>
+
+        <!-- RIGHT JOYSTICK: PITCH & ROLL -->
+        <div class="v-stick-col">
+          <div class="v-stick-header">
+            <span class="v-stick-title">PITCH / ROLL</span>
+            <span class="v-stick-hotkeys">[ARROW KEYS]</span>
+          </div>
+          <div class="v-stick-base" id="rightJoystickWrapper">
+            <div class="v-stick-crosshair x-axis"></div>
+            <div class="v-stick-crosshair y-axis"></div>
+            <div class="v-stick-nipple" id="rightJoystickNipple">
+              <div class="nipple-dot"></div>
+            </div>
+          </div>
+          <!-- Roll & Pitch Trims -->
+          <div class="v-trim-bar-group">
+            <div class="v-trim-bar">
+              <button class="v-trim-btn" id="trimRollMinus" title="Trim Roll Left">◀</button>
+              <span class="v-trim-label">ROLL: <span id="trimRollVal" class="mono">0</span></span>
+              <button class="v-trim-btn" id="trimRollPlus" title="Trim Roll Right">▶</button>
+            </div>
+            <div class="v-trim-bar">
+              <button class="v-trim-btn" id="trimPitchMinus" title="Trim Pitch Down">▼</button>
+              <span class="v-trim-label">PITCH: <span id="trimPitchVal" class="mono">0</span></span>
+              <button class="v-trim-btn" id="trimPitchPlus" title="Trim Pitch Up">▲</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- IMAGE PROCESSING & FRAME EXTRACTION STUDIO MODAL -->
+    <div id="imagesStudioModal" class="v-modal-backdrop hide">
+      <div class="v-modal-card v-studio-modal">
+        <div class="v-modal-header">
+          <div class="v-modal-title-group">
+            <div class="v-badge-guide">CV / AI STUDIO</div>
+            <h3>Drone Camera Image Processing & Data Extraction</h3>
+          </div>
+          <button id="btnCloseStudio" class="v-close-btn">&times;</button>
+        </div>
+
+        <div class="v-modal-body v-studio-body">
+          <div class="v-studio-top-controls">
+            <div class="studio-card">
+              <h4>📸 Frame Capture to Disk</h4>
+              <p class="studio-desc">Instantly captures high-resolution camera frames and stores them to <code>./camera_data/</code> with synced flight telemetry sidecar JSON.</p>
+              <div class="studio-actions-row">
+                <button id="btnCaptureFrameDisk" class="v-btn v-btn-primary">
+                  📷 Capture Frame Now [P]
+                </button>
+                <div class="auto-capture-toggle-group">
+                  <label class="toggle-switch-label">
+                    <input type="checkbox" id="chkAutoCapture">
+                    <span class="toggle-text">Continuous Auto-Save</span>
+                  </label>
+                  <select id="selAutoCaptureFps" class="v-select">
+                    <option value="1">1 FPS</option>
+                    <option value="2" selected>2 FPS</option>
+                    <option value="5">5 FPS</option>
+                    <option value="10">10 FPS</option>
+                    <option value="30">30 FPS (Full)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="studio-card">
+              <h4>🔌 Real-time Computer Vision & AI API</h4>
+              <p class="studio-desc">Your external Python / OpenCV / PyTorch / YOLO scripts can pull live camera data directly via HTTP REST API:</p>
+              <div class="api-endpoints-list">
+                <div class="endpoint-pill">
+                  <span class="ep-method">GET</span>
+                  <code class="ep-path">/api/camera-frame</code>
+                  <span class="ep-desc">Raw JPEG Stream</span>
+                </div>
+                <div class="endpoint-pill">
+                  <span class="ep-method">GET</span>
+                  <code class="ep-path">/api/camera-frame/json</code>
+                  <span class="ep-desc">Base64 + Sync Telemetry</span>
+                </div>
+                <div class="endpoint-pill">
+                  <span class="ep-method">CLI</span>
+                  <code class="ep-path">python process_frames.py</code>
+                  <span class="ep-desc">Live Processing Pipeline</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="v-studio-gallery-header">
+            <h4>Saved Frames on Disk (<span id="galleryCount">0</span>)</h4>
+            <button id="btnRefreshGallery" class="v-btn v-btn-ghost">🔄 Refresh Gallery</button>
+          </div>
+
+          <div id="framesGalleryGrid" class="v-frames-gallery-grid">
+            <div class="gallery-empty">No frames captured yet. Connect to drone and click 'Capture Frame Now' or press 'P'.</div>
+          </div>
+        </div>
+
+        <div class="v-modal-footer">
+          <button id="btnCloseStudioBottom" class="v-btn v-btn-secondary">Close Studio</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMPREHENSIVE FLIGHT CONTROLS & BUTTON MANUAL MODAL -->
+    <div id="guideModal" class="v-modal-backdrop hide">
+      <div class="v-modal-card v-guide-modal">
+        <div class="v-modal-header">
+          <div class="v-modal-title-group">
+            <div class="v-badge-guide">MANUAL</div>
+            <h3>RC UFO Drone Controls & Functionality Guide</h3>
+          </div>
+          <button id="btnCloseGuide" class="v-close-btn">&times;</button>
+        </div>
+
+        <div class="v-modal-body v-guide-body">
+          <div class="v-guide-tabs">
+            <button class="v-tab-btn active" data-tab="tab-overview">Overview</button>
+            <button class="v-tab-btn" data-tab="tab-sticks">Flight Sticks</button>
+            <button class="v-tab-btn" data-tab="tab-buttons">Action Buttons</button>
+            <button class="v-tab-btn" data-tab="tab-modes">Flight Modes</button>
+            <button class="v-tab-btn" data-tab="tab-camera">Camera & Vision</button>
+            <button class="v-tab-btn" data-tab="tab-wifi">Wi-Fi & Pairing</button>
+            <button class="v-tab-btn" data-tab="tab-shortcuts">Hotkeys</button>
+          </div>
+
+          <div class="v-tab-content">
+            <div id="tab-overview" class="guide-panel active">
+              <h4>System Architecture & Protocol</h4>
+              <p>
+                The <b>RC UFO Ground Control Station</b> connects directly to the drone's on-board Access Point over high-speed UDP (Port <code>7099</code>) and decodes live camera RTSP streams (Port <code>7070</code>) in real time.
+              </p>
+              <div class="guide-feature-grid">
+                <div class="feature-item">
+                  <div class="feature-icon">🛸</div>
+                  <div>
+                    <h5>GL & Legacy Protocol Engine</h5>
+                    <p>Automatically negotiates 21-byte GL or 9-byte Legacy packet formats with XOR checksums running at 25 Hz (40ms).</p>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-icon">📡</div>
+                  <div>
+                    <h5>Zero-Latency FPV Video</h5>
+                    <p>Decodes Motion-JPEG / H.264 streams from <code>rtsp://192.168.1.1:7070/webcam</code> with hardware accelerated PyAV demuxing.</p>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-icon">🖼️</div>
+                  <div>
+                    <h5>Image Processing Pipeline</h5>
+                    <p>Extract live frames directly via REST API or run <code>python process_frames.py</code> for OpenCV / AI processing.</p>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <div class="feature-icon">⚖️</div>
+                  <div>
+                    <h5>Sensor Trimming & Calibration</h5>
+                    <p>Fine-tune Roll, Pitch, and Yaw center drifts with hardware-level offset multipliers and 6-axis gyro leveling.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="tab-sticks" class="guide-panel">
+              <h4>Dual Stick Channel Mapping</h4>
+              <div class="guide-table-wrap">
+                <table class="v-table">
+                  <thead>
+                    <tr>
+                      <th>Stick / Axis</th>
+                      <th>Movement</th>
+                      <th>Keyboard</th>
+                      <th>Effect on Drone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><b>Left Stick (Y-Axis)</b></td>
+                      <td>Up / Down</td>
+                      <td><kbd>W</kbd> / <kbd>S</kbd></td>
+                      <td><b>Throttle / Altitude</b>: Increases/decreases motor RPM to ascend or descend.</td>
+                    </tr>
+                    <tr>
+                      <td><b>Left Stick (X-Axis)</b></td>
+                      <td>Left / Right</td>
+                      <td><kbd>A</kbd> / <kbd>D</kbd></td>
+                      <td><b>Yaw / Rudder</b>: Rotates drone clockwise or counter-clockwise on its vertical axis.</td>
+                    </tr>
+                    <tr>
+                      <td><b>Right Stick (Y-Axis)</b></td>
+                      <td>Up / Down</td>
+                      <td><kbd>↑</kbd> / <kbd>↓</kbd></td>
+                      <td><b>Pitch / Elevator</b>: Tilts drone forward (fly forward) or backward (fly backward).</td>
+                    </tr>
+                    <tr>
+                      <td><b>Right Stick (X-Axis)</b></td>
+                      <td>Left / Right</td>
+                      <td><kbd>←</kbd> / <kbd>→</kbd></td>
+                      <td><b>Roll / Aileron</b>: Tilts drone sideways to bank left or bank right.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="tab-buttons" class="guide-panel">
+              <h4>All Control Buttons & Functionality</h4>
+              <div class="guide-buttons-list">
+                <div class="btn-guide-row">
+                  <span class="badge-btn takeoff">🛫 TAKEOFF</span>
+                  <div class="btn-guide-info">
+                    <b>One-Key Auto Takeoff:</b> Sends the <code>FastFly</code> flag continuously for 1000ms. The drone spins all 4 motors, lifts off the ground, and stabilizes in hover at ~1.2 meters. Hotkey: <kbd>SPACE</kbd>.
+                  </div>
+                </div>
+
+                <div class="btn-guide-row">
+                  <span class="badge-btn land">🛬 LAND</span>
+                  <div class="btn-guide-info">
+                    <b>One-Key Auto Landing:</b> Sends the <code>FastDrop</code> flag for 1000ms. The drone smoothly descends until ground contact is detected, then disarms motors safely. Hotkey: <kbd>SHIFT</kbd>.
+                  </div>
+                </div>
+
+                <div class="btn-guide-row">
+                  <span class="badge-btn flip">🔄 360° FLIP</span>
+                  <div class="btn-guide-info">
+                    <b>Aerobatic Stunt Flip:</b> Opens the stunt direction menu (Left, Right, Front, Back). Pulses the selected axis to maximum displacement with the <code>CircleTurnEnd</code> bit for 600ms to perform a tight 360° flip. Hotkey: <kbd>F</kbd>.
+                  </div>
+                </div>
+
+                <div class="btn-guide-row">
+                  <span class="badge-btn gyro">⚖️ CALIBRATE GYRO</span>
+                  <div class="btn-guide-info">
+                    <b>6-Axis Gyroscope Calibration:</b> Sends <code>GyroCorrection</code> bit for 2000ms while holding sticks at neutral center (128). Calibrates horizontal IMU level. Drone LEDs will flash rapidly during calibration. Hotkey: <kbd>G</kbd>.
+                  </div>
+                </div>
+
+                <div class="btn-guide-row">
+                  <span class="badge-btn emergency">🛑 EMERGENCY STOP</span>
+                  <div class="btn-guide-info">
+                    <b>Emergency Motor Cutoff:</b> Immediately sets <code>EmergencyStop</code> flag and cuts power to all 4 motors. Use only to prevent a crash or runaway situation. Hotkey: <kbd>ESC</kbd>.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="tab-modes" class="guide-panel">
+              <h4>Flight Modes & Trim Tuning</h4>
+              <div class="guide-card-section">
+                <h5>⚓ Altitude Hold (Fixed Height)</h5>
+                <p>When enabled (default), the drone uses on-board optical flow and barometric pressure sensors to maintain current altitude automatically when the throttle stick is centered.</p>
+              </div>
+
+              <div class="guide-card-section">
+                <h5>🧭 Headless Mode (Orientation Lock)</h5>
+                <p>When active, the drone's forward direction is locked to the heading it had at takeoff. Pushing Pitch forward will always move the drone away from you, regardless of which way the drone's camera is facing.</p>
+              </div>
+
+              <div class="guide-card-section">
+                <h5>⚡ Speed Gear Sensitivity Rates</h5>
+                <ul>
+                  <li><b>30% (Slow / Indoor):</b> Stick range scaled to ±40 from center. Perfect for beginners and indoor precision flight.</li>
+                  <li><b>60% (Medium / Standard):</b> Stick range scaled to ±60 from center. Responsive outdoor cruising with good wind resistance.</li>
+                  <li><b>100% (Fast / Pro):</b> Full ±127 stick deflection authority (1..255). Maximum speed and aggressive agility.</li>
+                </ul>
+              </div>
+
+              <div class="guide-card-section">
+                <h5>◀▶ Trims (Roll, Pitch, Yaw)</h5>
+                <p>If the drone drifts when sticks are centered, click the respective Trim buttons (◀ / ▶ / ▲ / ▼) to apply hardware offset adjustments to cancel drift.</p>
+              </div>
+            </div>
+
+            <div id="tab-camera" class="guide-panel">
+              <h4>Camera, Images & Vision Processing</h4>
+              <ul>
+                <li><b>🖼️ Images Studio:</b> Click the <code>[🖼️ IMAGES / DATA]</code> button to open the capture studio, view stored frames, and toggle continuous disk auto-saving.</li>
+                <li><b>📷 Lens Switch ([C]):</b> Switches between Front Lens and Bottom Optical Flow Lens via UDP packet <code>[0x06, 0x01]</code> / <code>[0x06, 0x02]</code>.</li>
+                <li><b>🐍 Python CV Pipeline:</b> Run <code>python process_frames.py</code> to pull live frames for OpenCV / PyTorch / YOLO / NumPy processing.</li>
+                <li><b>📸 Quick Save ([P]):</b> Instantly captures and saves the live frame to <code>./camera_data/</code>.</li>
+              </ul>
+            </div>
+
+            <div id="tab-wifi" class="guide-panel">
+              <h4>Drone Wi-Fi Pairing Guide</h4>
+              <ol class="guide-numbered-list">
+                <li>Power on the drone. The camera gimbal will initialize and drone LEDs will flash.</li>
+                <li>On your laptop/PC, open Wi-Fi settings and search for networks.</li>
+                <li>Connect to the drone's open Wi-Fi network (SSID name starts with <code>KY-WiFi-</code>, <code>WiFi-</code>, <code>4K-WiFi-</code>, or <code>RC-UFO-</code>).</li>
+                <li>No internet is required. Keep the connection active.</li>
+                <li>The Ground Station connects automatically to <code>192.168.1.1:7099</code> and displays live camera feed from <code>rtsp://192.168.1.1:7070/webcam</code>.</li>
+              </ol>
+            </div>
+
+            <div id="tab-shortcuts" class="guide-panel">
+              <h4>Keyboard & Gamepad Hotkey Matrix</h4>
+              <div class="guide-table-wrap">
+                <table class="v-table">
+                  <thead>
+                    <tr>
+                      <th>Action</th>
+                      <th>Keyboard Hotkey</th>
+                      <th>Gamepad Mapping</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Throttle (Up/Down)</td><td><kbd>W</kbd> / <kbd>S</kbd></td><td>Left Stick Vertical (Inverted)</td></tr>
+                    <tr><td>Yaw (Turn Left/Right)</td><td><kbd>A</kbd> / <kbd>D</kbd></td><td>Left Stick Horizontal</td></tr>
+                    <tr><td>Pitch (Forward/Back)</td><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Right Stick Vertical (Inverted)</td></tr>
+                    <tr><td>Roll (Tilt Left/Right)</td><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Right Stick Horizontal</td></tr>
+                    <tr><td>Save Frame to Disk</td><td><kbd>P</kbd></td><td>Right Trigger (RT / R2)</td></tr>
+                    <tr><td>One-Key Takeoff</td><td><kbd>SPACE</kbd></td><td>Button A / Cross</td></tr>
+                    <tr><td>One-Key Land</td><td><kbd>SHIFT</kbd></td><td>Button B / Circle</td></tr>
+                    <tr><td>Emergency Stop</td><td><kbd>ESC</kbd></td><td>Start / Options Button</td></tr>
+                    <tr><td>360° Stunt Flip</td><td><kbd>F</kbd></td><td>Right Shoulder (RB / R1)</td></tr>
+                    <tr><td>Gyro Calibration</td><td><kbd>G</kbd></td><td>Left Shoulder (LB / L1)</td></tr>
+                    <tr><td>Dual Camera Switch</td><td><kbd>C</kbd></td><td>D-Pad Up</td></tr>
+                    <tr><td>Gear 30% / 60% / 100%</td><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>D-Pad Left / Down / Right</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="v-modal-footer">
+          <button id="btnCloseGuideBottom" class="v-btn v-btn-primary">Got it, Let's Fly</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTONOMOUS MISSION SCRIPTING STUDIO MODAL -->
+    <div id="mission-modal" class="v-modal-backdrop hide">
+      <div class="v-modal-card mission-modal-card">
+        <div class="v-modal-header">
+          <div class="v-modal-title-group">
+            <div class="v-badge-guide">AUTONOMOUS SCRIPTING</div>
+            <h3>Autonomous Flight Mission Studio & Vision Avoidance</h3>
+          </div>
+          <button id="btnCloseMission" class="v-close-btn">&times;</button>
+        </div>
+
+        <div class="v-modal-body mission-modal-body">
+          <div class="mission-top-bar">
+            <div class="mission-selector-group">
+              <label class="v-label">Preset Mission:</label>
+              <select id="mission-preset-select" class="v-select">
+                <option value="custom_request">Demo: 50cm Fwd &rarr; 50cm Right &rarr; 20cm Fwd &rarr; Land</option>
+                <option value="square_patrol">Demo: Square Patrol Box (40cm x 40cm)</option>
+                <option value="obstacle_scout">Demo: Vision Obstacle Avoidance Scout</option>
+                <option value="stunt_flip">Demo: Takeoff, 360 Spin, Flip & Land</option>
+              </select>
+            </div>
+
+            <div class="mission-radar-container">
+              <div class="v-label">Camera Obstacle Radar:</div>
+              <div id="mission-obstacle-radar" class="radar-box">
+                <div class="radar-status clear">
+                  <span class="radar-dot"></span>
+                  <span class="radar-text">PATH CLEAR (0%)</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mission-status-container">
+              <div class="v-label">Status:</div>
+              <div id="mission-status-pill" class="status-pill status-ready">READY</div>
+            </div>
+          </div>
+
+          <div class="mission-grid-layout">
+            <!-- Left: Script Code Editor -->
+            <div class="mission-editor-panel">
+              <div class="panel-header">
+                <span>Flight Script (DSL Editor)</span>
+                <span class="editor-syntax-help">TAKEOFF | LAND | FORWARD &lt;cm&gt; | RIGHT &lt;cm&gt; | HOVER &lt;sec&gt;</span>
+              </div>
+              <textarea id="mission-script-editor" class="mission-textarea" spellcheck="false" placeholder="# Enter flight commands..."></textarea>
+              <div class="editor-actions">
+                <button id="btn-save-mission" class="v-btn v-btn-secondary">💾 Save Script</button>
+                <button id="btn-abort-mission" class="v-btn v-btn-danger">🛑 EMERGENCY ABORT</button>
+                <button id="btn-run-mission" class="v-btn v-btn-primary">▶️ RUN MISSION SCRIPT</button>
+              </div>
+            </div>
+
+            <!-- Right: Step Progress & Execution Log -->
+            <div class="mission-execution-panel">
+              <div class="panel-header">
+                <span>Mission Step Sequence</span>
+                <span class="sub-text">Real-Time Progression</span>
+              </div>
+              <div id="mission-steps-progress" class="mission-steps-list">
+                <!-- Dynamically populated steps -->
+              </div>
+
+              <div class="panel-header" style="margin-top: 10px;">
+                <span>Mission & Vision Log</span>
+              </div>
+              <div id="mission-log" class="mission-log-box">
+                <div class="mission-log-line log-info">[System] Autonomous Mission Engine initialized. Ready to fly.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NETWORK & ENDPOINT SETTINGS MODAL -->
+    <div id="settingsModal" class="v-modal-backdrop hide">
+      <div class="v-modal-card">
+        <div class="v-modal-header">
+          <div class="v-modal-title-group">
+            <div class="v-badge-guide">CONFIG</div>
+            <h3>Drone Network & Stream Configuration</h3>
+          </div>
+          <button id="btnCloseSettings" class="v-close-btn">&times;</button>
+        </div>
+        <div class="v-modal-body">
+          <div class="v-form-group">
+            <label class="v-label">Drone IP Gateway:</label>
+            <input type="text" id="cfgDroneIp" value="192.168.1.1" class="v-input" placeholder="192.168.1.1">
+            <span class="v-hint">Default AP gateway IP assigned by the drone Wi-Fi controller.</span>
+          </div>
+
+          <div class="v-form-group">
+            <label class="v-label">UDP Telemetry & Control Port:</label>
+            <input type="text" id="cfgUdpPort" value="7099" class="v-input" placeholder="7099">
+            <span class="v-hint">Bidirectional control and heartbeat port (Port 7099).</span>
+          </div>
+
+          <div class="v-form-group">
+            <label class="v-label">RTSP Video Stream URL:</label>
+            <input type="text" id="cfgRtspUrl" value="rtsp://192.168.1.1:7070/webcam" class="v-input" placeholder="rtsp://192.168.1.1:7070/webcam">
+            <span class="v-hint">Live MJPEG/H.264 camera stream endpoint.</span>
+          </div>
+
+          <button id="btnSaveConfig" class="v-btn v-btn-primary full-width">
+            💾 Save Settings & Reconnect
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/hud.js"></script>
+  <script src="js/joystick.js"></script>
+  <script src="js/mission_runner.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
