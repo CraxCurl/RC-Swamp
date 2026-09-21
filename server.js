@@ -56,8 +56,8 @@ const droneState = {
   gear: 2, // 1: 30%, 2: 60%, 3: 100%
   cameraId: 1, // 1: Front, 2: Bottom
   isFlipping: false,
-  lastRtspTime: 0,
-  lastUdpVideoTime: 0,
+  lockedVideoSource: null,
+  lastSourceFrameTime: 0,
 
   // Telemetry & Diagnostics
   packetsSent: 0,
@@ -128,21 +128,17 @@ function broadcastVideoFrame(buffer, source = 'STREAM') {
   if (!buffer || buffer.length < 100) return;
   const now = Date.now();
 
-  const isRtsp = source === 'PyAV-RTSP';
-  const selectedCam = droneState.cameraId || 1;
-
-  // Manual camera stream lock: change stream ONLY when user manually switches lens
-  if (selectedCam === 1) {
-    if (!isRtsp && droneState.lastRtspTime && (now - droneState.lastRtspTime < 3000)) {
-      return; // Lock to Front RTSP stream when active
+  // Strict Single-Source Camera Lock:
+  // Lock to the first active video source (e.g. PyAV-RTSP or primary UDP stream).
+  // Reject frames from secondary sources to permanently prevent camera feed auto-switching.
+  if (droneState.lockedVideoSource && droneState.lockedVideoSource !== source) {
+    if (now - droneState.lastSourceFrameTime < 10000) {
+      return; // Reject frame from secondary/other source
     }
-    if (isRtsp) droneState.lastRtspTime = now;
-  } else if (selectedCam === 2) {
-    if (isRtsp && droneState.lastUdpVideoTime && (now - droneState.lastUdpVideoTime < 3000)) {
-      return; // Lock to Bottom UDP stream when active
-    }
-    if (!isRtsp) droneState.lastUdpVideoTime = now;
   }
+
+  droneState.lockedVideoSource = source;
+  droneState.lastSourceFrameTime = now;
 
   droneState.hasLiveVideo = true;
   droneState.lastVideoTime = now;
@@ -535,8 +531,9 @@ wssTelemetry.on('connection', (ws) => {
         droneState.gear = msg.gear;
       } else if (msg.action === 'switch_camera') {
         droneState.cameraId = msg.camera_id;
-        droneState.lastRtspTime = 0;
-        droneState.lastUdpVideoTime = 0;
+        droneState.lockedVideoSource = null;
+        droneState.lastSourceFrameTime = 0;
+        sendDroneUdp(Buffer.from([0x06, msg.camera_id]));
         sendDroneUdp(Buffer.from([0x06, msg.camera_id]));
       } else if (msg.action === 'set_trims') {
         droneState.rollTrim = msg.roll_trim;
@@ -662,8 +659,9 @@ app.post('/api/control', (req, res) => {
   } else if (action === 'switch_camera') {
     const camId = camera_id || (droneState.cameraId === 1 ? 2 : 1);
     droneState.cameraId = camId;
-    droneState.lastRtspTime = 0;
-    droneState.lastUdpVideoTime = 0;
+    droneState.lockedVideoSource = null;
+    droneState.lastSourceFrameTime = 0;
+    sendDroneUdp(Buffer.from([0x06, camId]));
     sendDroneUdp(Buffer.from([0x06, camId]));
   }
 

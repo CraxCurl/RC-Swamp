@@ -342,6 +342,8 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 cam_id = msg.get("camera_id", 1)
                 drone_state.camera_id = cam_id
                 send_drone_udp(bytes([0x06, cam_id]))
+                send_drone_udp(bytes([0x06, cam_id]))
+                send_drone_udp(bytes([0x06, cam_id]))
             elif action == "set_trims":
                 drone_state.roll_trim = msg.get("roll_trim", 0)
                 drone_state.pitch_trim = msg.get("pitch_trim", 0)
