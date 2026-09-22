@@ -124,22 +124,12 @@ function saveFrameToDisk(buffer, label = 'frame') {
   return { filename, filepath, timestamp: now.toISOString(), frame_number: droneState.videoFramesCount };
 }
 
-function broadcastVideoFrame(buffer, source = 'STREAM') {
+function broadcastVideoFrame(buffer, source = 'PyAV-RTSP') {
   if (!buffer || buffer.length < 100) return;
   const now = Date.now();
 
-  // Strict Single-Source Camera Lock:
-  // Lock to the first active video source (e.g. PyAV-RTSP or primary UDP stream).
-  // Reject frames from secondary sources to permanently prevent camera feed auto-switching.
-  if (droneState.lockedVideoSource && droneState.lockedVideoSource !== source) {
-    if (now - droneState.lastSourceFrameTime < 10000) {
-      return; // Reject frame from secondary/other source
-    }
-  }
-
   droneState.lockedVideoSource = source;
   droneState.lastSourceFrameTime = now;
-
   droneState.hasLiveVideo = true;
   droneState.lastVideoTime = now;
   droneState.videoFramesCount++;
@@ -240,96 +230,11 @@ function startPyAvRtspRelay() {
 
 startPyAvRtspRelay();
 
-// ----------------- 2. Fragmented Multi-Packet UDP MJPEG Reassembler ----------------- //
-class UdpMjpegReassembler {
-  constructor(name) {
-    this.name = name;
-    this.chunks = [];
-    this.totalBytes = 0;
-    this.inFrame = false;
-    this.lastPacketTime = 0;
-  }
-
-  feedPacket(buffer) {
-    const now = Date.now();
-    if (this.inFrame && now - this.lastPacketTime > 250) {
-      this.reset();
-    }
-    this.lastPacketTime = now;
-
-    const soiIndex = buffer.indexOf(Buffer.from([0xFF, 0xD8]));
-    const eoiIndex = buffer.indexOf(Buffer.from([0xFF, 0xD9]));
-
-    if (soiIndex !== -1 && eoiIndex !== -1 && eoiIndex > soiIndex) {
-      const singleFrame = buffer.subarray(soiIndex, eoiIndex + 2);
-      this.reset();
-      broadcastVideoFrame(singleFrame, `UDP-Single-${this.name}`);
-      return;
-    }
-
-    if (soiIndex !== -1) {
-      this.reset();
-      this.inFrame = true;
-      const startSlice = buffer.subarray(soiIndex);
-      this.chunks.push(startSlice);
-      this.totalBytes += startSlice.length;
-      return;
-    }
-
-    if (this.inFrame) {
-      if (eoiIndex !== -1) {
-        const endSlice = buffer.subarray(0, eoiIndex + 2);
-        this.chunks.push(endSlice);
-        this.totalBytes += endSlice.length;
-
-        if (this.totalBytes > 1000 && this.totalBytes < 2 * 1024 * 1024) {
-          const completeFrame = Buffer.concat(this.chunks, this.totalBytes);
-          broadcastVideoFrame(completeFrame, `UDP-Reassembled-${this.name}`);
-        }
-        this.reset();
-      } else {
-        this.chunks.push(buffer);
-        this.totalBytes += buffer.length;
-        if (this.totalBytes > 2 * 1024 * 1024) {
-          this.reset();
-        }
-      }
-    }
-  }
-
-  reset() {
-    this.chunks = [];
-    this.totalBytes = 0;
-    this.inFrame = false;
-  }
-}
-
-const controlSocketReassembler = new UdpMjpegReassembler('7099');
-
-const videoUdpPorts = [7099, 7098, 7070, 7060, 8888, 8080, 8554, 9000, 50000, 5000];
-videoUdpPorts.forEach(port => {
-  try {
-    const reasm = new UdpMjpegReassembler(port.toString());
-    const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-    sock.on('error', () => {});
-    sock.on('message', (msg) => {
-      reasm.feedPacket(msg);
-    });
-    sock.bind(port, '0.0.0.0', () => {});
-  } catch (e) {}
-});
-
-// ----------------- 3. UDP Control Socket & Protocol ----------------- //
+// ----------------- 2. UDP Control Socket & Protocol ----------------- //
 const udpClient = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
 udpClient.on('error', (err) => {
   console.warn('[UDP Warning]', err.message);
-});
-
-udpClient.on('message', (msg) => {
-  droneState.packetsReceived++;
-  droneState.connected = true;
-  controlSocketReassembler.feedPacket(msg);
 });
 
 function sendDroneUdp(buffer) {
@@ -393,10 +298,10 @@ function buildControlPacket() {
   }
 }
 
-// 1 Hz Heartbeat & Camera Sensor Wakeup
+// 1 Hz Heartbeat Ping to Drone Firmware (Port 7099)
+// NOTE: Heartbeat is strictly [0x01, 0x01]. Do NOT send 0x06 here as 0x06 triggers hardware camera switching.
 setInterval(() => {
   sendDroneUdp(Buffer.from([0x01, 0x01]));
-  sendDroneUdp(Buffer.from([0x06, droneState.cameraId || 0x01]));
 }, 1000);
 
 // Helper function to send immediate UDP bursts for critical flight triggers
@@ -435,8 +340,6 @@ udpClient.on('message', (msg, rinfo) => {
   droneState.lastTelemetryTime = Date.now();
   droneState.connected = true;
   droneState.connectionDiagnostic = 'CONNECTED_TO_DRONE';
-
-  controlSocketReassembler.feedPacket(msg);
 
   if (msg.length >= 1) {
     const devId = msg[0];
@@ -825,7 +728,7 @@ app.post('/api/config', (req, res) => {
 
 server.listen(WEB_PORT, '0.0.0.0', () => {
   console.log('='.repeat(65));
-  console.log('🛸 RC UFO DRONE GROUND CONTROL STATION - ACTIVE');
+  console.log('RC UFO DRONE GROUND CONTROL STATION - ACTIVE');
   console.log('='.repeat(65));
   console.log(`[*] Target Drone IP: ${droneState.droneIp}:${droneState.udpPort}`);
   console.log(`[*] RTSP Stream URL: ${droneState.rtspUrl}`);

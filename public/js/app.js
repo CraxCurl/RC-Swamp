@@ -43,7 +43,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Image Processing & Auto-Capture
     savedFramesCount: 0,
     autoCapture: false,
-    autoCaptureFps: 2
+    autoCaptureFps: 2,
+
+    // Camera Transformations
+    cameraRotation: parseInt(localStorage.getItem('drone_cam_rotation') || '0', 10), // 0, 90, 180, 270
+    cameraInvert: localStorage.getItem('drone_cam_invert') === 'true', // Vertical Flip (Invert)
+    cameraMirror: localStorage.getItem('drone_cam_mirror') === 'true'  // Horizontal Flip (Mirror)
   };
 
   // ----------------- DOM ELEMENTS ----------------- //
@@ -85,6 +90,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnAltHold = document.getElementById('btnAltHold');
   const btnHeadless = document.getElementById('btnHeadless');
   const btnCamSwitch = document.getElementById('btnCamSwitch');
+  const btnRotateFeed = document.getElementById('btnRotateFeed');
+  const rotationValText = document.getElementById('rotationValText');
+  const btnInvertFeed = document.getElementById('btnInvertFeed');
+  const invertStatus = document.getElementById('invertStatus');
+  const btnMirrorFeed = document.getElementById('btnMirrorFeed');
+  const mirrorStatus = document.getElementById('mirrorStatus');
   const btnGyro = document.getElementById('btnGyro');
   const btnEmergency = document.getElementById('btnEmergency');
 
@@ -400,6 +411,12 @@ document.addEventListener('DOMContentLoaded', () => {
       triggerFlip('right');
     } else if (e.code === 'KeyC') {
       triggerCamSwitch();
+    } else if (e.code === 'KeyR') {
+      triggerRotateCamera();
+    } else if (e.code === 'KeyV') {
+      triggerInvertCamera();
+    } else if (e.code === 'KeyH') {
+      triggerMirrorCamera();
     } else if (e.code === 'KeyP') {
       triggerCaptureFrameDisk();
     } else if (e.code === 'KeyM') {
@@ -487,7 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function triggerTakeoff() {
     btnTakeoff.classList.add('active');
     setTimeout(() => btnTakeoff.classList.remove('active'), 1200);
-    showToast('🛫 TAKEOFF SEQUENCE ENGAGED');
+    showToast('TAKEOFF SEQUENCE ENGAGED');
     speak('Takeoff initiated');
     sendCommand({ action: 'takeoff' });
   }
@@ -495,7 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function triggerLand() {
     btnLand.classList.add('active');
     setTimeout(() => btnLand.classList.remove('active'), 1200);
-    showToast('🛬 AUTO-LAND ENGAGED');
+    showToast('AUTO-LAND ENGAGED');
     speak('Landing sequence engaged');
     sendCommand({ action: 'land' });
   }
@@ -503,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function triggerEmergency() {
     btnEmergency.classList.add('active');
     setTimeout(() => btnEmergency.classList.remove('active'), 1000);
-    showToast('🛑 EMERGENCY MOTOR CUTOFF!');
+    showToast('EMERGENCY MOTOR CUTOFF!');
     speak('Emergency stop activated');
     sendCommand({ action: 'emergency_stop' });
   }
@@ -511,13 +528,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function triggerCalibrate() {
     btnGyro.classList.add('active');
     setTimeout(() => btnGyro.classList.remove('active'), 2000);
-    showToast('⚖️ GYRO CALIBRATION INITIATED — KEEP LEVEL');
+    showToast('GYRO CALIBRATION INITIATED — KEEP LEVEL');
     speak('Calibrating sensors');
     sendCommand({ action: 'calibrate_gyro' });
   }
 
   function triggerFlip(dir = 'right') {
-    showToast(`🔄 360° ${dir.toUpperCase()} STUNT FLIP`);
+    showToast(`360° ${dir.toUpperCase()} STUNT FLIP`);
     speak(`Performing ${dir} flip`);
     sendCommand({ action: 'flip_360', direction: dir });
   }
@@ -530,17 +547,57 @@ document.addEventListener('DOMContentLoaded', () => {
     sendCommand({ action: 'switch_camera', camera_id: state.cameraId });
   }
 
+  function triggerRotateCamera() {
+    state.cameraRotation = (state.cameraRotation + 90) % 360;
+    localStorage.setItem('drone_cam_rotation', String(state.cameraRotation));
+    updateCameraTransformUI();
+    showToast(`CAMERA ROTATION: ${state.cameraRotation}°`);
+    speak(`Camera rotated to ${state.cameraRotation} degrees`);
+  }
+
+  function triggerInvertCamera() {
+    state.cameraInvert = !state.cameraInvert;
+    localStorage.setItem('drone_cam_invert', String(state.cameraInvert));
+    updateCameraTransformUI();
+    showToast(`CAMERA INVERT (V-FLIP): ${state.cameraInvert ? 'ON' : 'OFF'}`);
+    speak(`Camera vertical invert ${state.cameraInvert ? 'on' : 'off'}`);
+  }
+
+  function triggerMirrorCamera() {
+    state.cameraMirror = !state.cameraMirror;
+    localStorage.setItem('drone_cam_mirror', String(state.cameraMirror));
+    updateCameraTransformUI();
+    showToast(`CAMERA MIRROR (H-FLIP): ${state.cameraMirror ? 'ON' : 'OFF'}`);
+    speak(`Camera horizontal mirror ${state.cameraMirror ? 'on' : 'off'}`);
+  }
+
+  function updateCameraTransformUI() {
+    if (rotationValText) rotationValText.textContent = `${state.cameraRotation}°`;
+    if (invertStatus) {
+      invertStatus.textContent = state.cameraInvert ? 'ON' : 'OFF';
+      invertStatus.className = state.cameraInvert ? 'btn-sub status-on' : 'btn-sub status-off';
+    }
+    if (btnInvertFeed) btnInvertFeed.classList.toggle('active', state.cameraInvert);
+    if (mirrorStatus) {
+      mirrorStatus.textContent = state.cameraMirror ? 'ON' : 'OFF';
+      mirrorStatus.className = state.cameraMirror ? 'btn-sub status-on' : 'btn-sub status-off';
+    }
+    if (btnMirrorFeed) btnMirrorFeed.classList.toggle('active', state.cameraMirror);
+  }
+
+  updateCameraTransformUI();
+
   function triggerCaptureFrameDisk() {
     fetch('/api/capture-snapshot', { method: 'POST' })
       .then(r => r.json())
       .then(data => {
         if (data.success) {
-          showToast(`📸 FRAME SAVED TO DISK (${data.filename})`);
+          showToast(`FRAME SAVED TO DISK (${data.filename})`);
           speak('Frame captured');
           if (savedFramesStat) savedFramesStat.textContent = data.total_saved;
           loadFramesGallery();
         } else {
-          showToast('⚠️ NO CAMERA FRAME AVAILABLE YET');
+          showToast('NO CAMERA FRAME AVAILABLE YET');
         }
       })
       .catch(() => showToast('FAILED TO SAVE FRAME'));
@@ -551,6 +608,9 @@ document.addEventListener('DOMContentLoaded', () => {
   btnEmergency.addEventListener('click', triggerEmergency);
   btnGyro.addEventListener('click', triggerCalibrate);
   btnCamSwitch.addEventListener('click', triggerCamSwitch);
+  if (btnRotateFeed) btnRotateFeed.addEventListener('click', triggerRotateCamera);
+  if (btnInvertFeed) btnInvertFeed.addEventListener('click', triggerInvertCamera);
+  if (btnMirrorFeed) btnMirrorFeed.addEventListener('click', triggerMirrorCamera);
 
   btnFlipMenu.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -662,7 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.isRecording = true;
         recDot.classList.remove('hide');
         btnRecord.classList.add('active');
-        showToast('⏺️ RECORDING STARTED');
+        showToast('RECORDING STARTED');
         speak('Recording started');
       } catch (e) {
         showToast('RECORDING UNAVAILABLE');
@@ -672,7 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.isRecording = false;
       recDot.classList.add('hide');
       btnRecord.classList.remove('active');
-      showToast('💾 VIDEO RECORDING SAVED');
+      showToast('VIDEO RECORDING SAVED');
       speak('Recording saved');
     }
   });
@@ -772,7 +832,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <img src="${f.url}" class="gallery-img" alt="${f.filename}" loading="lazy">
             <div class="gallery-meta-overlay">
               <span>${f.filename.slice(0, 16)}...</span>
-              <a href="${f.url}" download="${f.filename}" class="gallery-download-link" title="Download High-Res Image">💾 DL</a>
+              <a href="${f.url}" download="${f.filename}" class="gallery-download-link" title="Download High-Res Image">DL</a>
             </div>
           </div>
         `).join('');
@@ -862,6 +922,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ----------------- MAIN CONTINUOUS VIDEO & HUD RENDER LOOP ----------------- //
+  const hudOverlays = document.querySelector('.v-hud-overlays');
+
   function renderLoop() {
     const w = videoCanvas.width;
     const h = videoCanvas.height;
@@ -870,11 +932,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const hasRecentDroneFrame = (now - lastDroneFrameTime < 4000) && latestDroneBitmap;
 
     if (hasRecentDroneFrame) {
-      videoCtx.drawImage(latestDroneBitmap, 0, 0, w, h);
+      videoCtx.save();
+      videoCtx.clearRect(0, 0, w, h);
+      videoCtx.translate(w / 2, h / 2);
+
+      if (state.cameraRotation !== 0) {
+        videoCtx.rotate((state.cameraRotation * Math.PI) / 180);
+      }
+
+      const scaleX = state.cameraMirror ? -1 : 1;
+      const scaleY = state.cameraInvert ? -1 : 1;
+      if (scaleX !== 1 || scaleY !== 1) {
+        videoCtx.scale(scaleX, scaleY);
+      }
+
+      const isRotated90 = (state.cameraRotation === 90 || state.cameraRotation === 270);
+      const drawW = isRotated90 ? h : w;
+      const drawH = isRotated90 ? w : h;
+      videoCtx.drawImage(latestDroneBitmap, -drawW / 2, -drawH / 2, drawW, drawH);
+      videoCtx.restore();
+
       standbyOverlay.classList.add('hide');
+      if (hudOverlays) hudOverlays.classList.remove('hide');
+      hud.render();
     } else {
       videoCtx.clearRect(0, 0, w, h);
       standbyOverlay.classList.remove('hide');
+      if (hudOverlays) hudOverlays.classList.add('hide');
+      hud.clear();
     }
 
     if (now - lastFpsCalcTime >= 1000) {
@@ -884,7 +969,6 @@ document.addEventListener('DOMContentLoaded', () => {
       lastFpsCalcTime = now;
     }
 
-    hud.render();
     requestAnimationFrame(renderLoop);
   }
 

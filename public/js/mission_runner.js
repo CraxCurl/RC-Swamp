@@ -450,7 +450,7 @@ LAND`
 
     this.updateUIState();
     this.renderStepsProgress();
-    this.log(`⚠️ MISSION ABORTED: ${reason}`, "error");
+    this.log(`MISSION ABORTED: ${reason}`, "error");
   }
 
   completeMission() {
@@ -468,7 +468,7 @@ LAND`
     }
     this.updateUIState();
     this.renderStepsProgress();
-    this.log("✅ MISSION COMPLETED SUCCESSFULLY (100% SPEED + STABILIZED)", "success");
+    this.log("MISSION COMPLETED SUCCESSFULLY (100% SPEED + STABILIZED)", "success");
   }
 
   updateUIState() {

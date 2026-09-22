@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>RC UFO GCS — Autonomous & FPV Ground Control</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="vercel-theme">
@@ -56,32 +55,48 @@
       <!-- Header Action Controls -->
       <div class="v-header-right">
         <button id="btnMissions" class="v-btn v-btn-primary" title="Autonomous Flight Script Runner & Obstacle Avoidance [M]">
-          <span class="v-btn-icon">⚡</span>
+          <span class="v-btn-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </span>
           <span class="v-btn-text">AUTO MISSIONS</span>
         </button>
         <button id="btnImagesStudio" class="v-btn v-btn-secondary" title="Image Processing & Export Studio [P]">
-          <span class="v-btn-icon">🖼️</span>
+          <span class="v-btn-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </span>
           <span class="v-btn-text">IMAGES / DATA</span>
         </button>
         <button id="btnGuide" class="v-btn v-btn-secondary" title="Flight Controls & Button Manual">
-          <span class="v-btn-icon">📖</span>
+          <span class="v-btn-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </span>
           <span class="v-btn-text">GUIDE</span>
         </button>
         <button id="btnSnapshot" class="v-btn v-btn-ghost" title="Capture High-Res Snapshot to Disk [P]">
-          <span class="v-btn-icon">📷</span>
+          <span class="v-btn-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
         </button>
         <button id="btnRecord" class="v-btn v-btn-ghost" title="Record FPV Stream">
-          <span class="v-btn-icon">⏺️</span>
+          <span class="v-btn-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+          </span>
           <span id="recDot" class="rec-dot hide"></span>
         </button>
         <button id="btnVoice" class="v-btn v-btn-ghost active" title="Toggle Voice Alerts">
-          <span class="v-btn-icon">🔊</span>
+          <span class="v-btn-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          </span>
         </button>
         <button id="btnSettings" class="v-btn v-btn-ghost" title="Network & Drone Settings">
-          <span class="v-btn-icon">⚙️</span>
+          <span class="v-btn-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </span>
         </button>
         <button id="btnFullscreen" class="v-btn v-btn-ghost" title="Fullscreen HUD">
-          <span class="v-btn-icon">⛶</span>
+          <span class="v-btn-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </span>
         </button>
       </div>
     </header>
@@ -90,7 +105,9 @@
     <nav class="v-actions-bar">
       <div class="v-action-group">
         <button id="btnTakeoff" class="v-action-btn v-action-takeoff" title="One-Key Automatic Takeoff [SPACE]">
-          <span class="btn-icon">🛫</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2L16 11l3.5-3.5C21 6 21 4 19.5 2.5S18 1 16.5 2.5L13 6 4.8 4.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">TAKEOFF</span>
             <span class="btn-sub">[SPACE]</span>
@@ -98,7 +115,9 @@
         </button>
 
         <button id="btnLand" class="v-action-btn v-action-land" title="One-Key Automatic Descent & Landing [SHIFT]">
-          <span class="btn-icon">🛬</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 19.2L4 11 .5 7.5C0 6 0 4 1.5 2.5S5 1 6.5 2.5L10 6l8.2-1.8c.5-.1.9.1 1.1.5l.3.5c.2.5.1 1-.3 1.3L15 12l2 3h3l1 1-3 2-2 3-1-1v-3l-3-2-3.5 5.3c-.3.4-.8.5-1.3.3l-.5-.2c-.4-.3-.6-.7-.5-1.2z"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">LAND</span>
             <span class="btn-sub">[SHIFT]</span>
@@ -109,7 +128,9 @@
       <div class="v-action-group">
         <div class="v-dropdown-wrap">
           <button id="btnFlipMenu" class="v-action-btn v-action-stunt" title="Execute 360° Aerial Stunt Flip">
-            <span class="btn-icon">🔄</span>
+            <span class="btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </span>
             <div class="btn-text-wrap">
               <span class="btn-main">360° FLIP</span>
               <span class="btn-sub">STUNT [F]</span>
@@ -132,7 +153,9 @@
         </div>
 
         <button id="btnAltHold" class="v-action-btn v-action-toggle active" title="Barometric Altitude Hold Mode">
-          <span class="btn-icon">⚓</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">ALT HOLD</span>
             <span id="altHoldStatus" class="btn-sub status-on">ACTIVE</span>
@@ -140,7 +163,9 @@
         </button>
 
         <button id="btnHeadless" class="v-action-btn v-action-toggle" title="Headless Flight Orientation Mode">
-          <span class="btn-icon">🧭</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">HEADLESS</span>
             <span id="headlessStatus" class="btn-sub status-off">INACTIVE</span>
@@ -148,15 +173,49 @@
         </button>
 
         <button id="btnCamSwitch" class="v-action-btn v-action-toggle" title="Switch Dual Camera Lens (Front / Bottom) [C]">
-          <span class="btn-icon">📷</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">LENS: <span id="camIdText">FRONT</span></span>
             <span class="btn-sub">TOGGLE [C]</span>
           </div>
         </button>
 
+        <button id="btnRotateFeed" class="v-action-btn v-action-toggle" title="Rotate Camera View (+90°) [R]">
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
+          </span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">ROTATE: <span id="rotationValText">0°</span></span>
+            <span class="btn-sub">[R]</span>
+          </div>
+        </button>
+
+        <button id="btnInvertFeed" class="v-action-btn v-action-toggle" title="Invert / Flip Vertical [V]">
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 16 12 21 17 16"/><polyline points="7 8 12 3 17 8"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+          </span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">INVERT</span>
+            <span id="invertStatus" class="btn-sub status-off">OFF</span>
+          </div>
+        </button>
+
+        <button id="btnMirrorFeed" class="v-action-btn v-action-toggle" title="Mirror / Flip Horizontal [H]">
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 7 21 12 16 17"/><polyline points="8 7 3 12 8 17"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+          </span>
+          <div class="btn-text-wrap">
+            <span class="btn-main">MIRROR</span>
+            <span id="mirrorStatus" class="btn-sub status-off">OFF</span>
+          </div>
+        </button>
+
         <button id="btnGyro" class="v-action-btn v-action-gyro" title="Recalibrate 6-Axis Gyroscope Sensors [G]">
-          <span class="btn-icon">⚖️</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">CALIBRATE</span>
             <span class="btn-sub">GYRO [G]</span>
@@ -166,7 +225,9 @@
 
       <div class="v-action-group end">
         <button id="btnEmergency" class="v-action-btn v-action-emergency" title="Emergency Cut Power to All 4 Motors [ESC]">
-          <span class="btn-icon">🛑</span>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><octagon fill="none" points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </span>
           <div class="btn-text-wrap">
             <span class="btn-main">EMERGENCY STOP</span>
             <span class="btn-sub">CUT MOTORS [ESC]</span>
@@ -231,10 +292,10 @@
             </div>
             <div class="v-standby-actions">
               <button id="btnOpenGuideFromStandby" class="v-btn v-btn-secondary">
-                📖 View Controls Guide
+                View Controls Guide
               </button>
               <button id="btnOpenSettingsFromStandby" class="v-btn v-btn-ghost">
-                ⚙️ Network Settings
+                Network Settings
               </button>
             </div>
           </div>
@@ -267,7 +328,7 @@
 
         <!-- Gamepad Indicator -->
         <div id="gamepadIndicator" class="v-gamepad-badge hide">
-          🎮 GAMEPAD CONTROLLER ACTIVE
+          GAMEPAD CONTROLLER ACTIVE
         </div>
       </div>
 
@@ -363,11 +424,11 @@
         <div class="v-modal-body v-studio-body">
           <div class="v-studio-top-controls">
             <div class="studio-card">
-              <h4>📸 Frame Capture to Disk</h4>
+              <h4>Frame Capture to Disk</h4>
               <p class="studio-desc">Instantly captures high-resolution camera frames and stores them to <code>./camera_data/</code> with synced flight telemetry sidecar JSON.</p>
               <div class="studio-actions-row">
                 <button id="btnCaptureFrameDisk" class="v-btn v-btn-primary">
-                  📷 Capture Frame Now [P]
+                  Capture Frame Now [P]
                 </button>
                 <div class="auto-capture-toggle-group">
                   <label class="toggle-switch-label">
@@ -386,7 +447,7 @@
             </div>
 
             <div class="studio-card">
-              <h4>🔌 Real-time Computer Vision & AI API</h4>
+              <h4>Real-time Computer Vision & AI API</h4>
               <p class="studio-desc">Your external Python / OpenCV / PyTorch / YOLO scripts can pull live camera data directly via HTTP REST API:</p>
               <div class="api-endpoints-list">
                 <div class="endpoint-pill">
@@ -410,7 +471,7 @@
 
           <div class="v-studio-gallery-header">
             <h4>Saved Frames on Disk (<span id="galleryCount">0</span>)</h4>
-            <button id="btnRefreshGallery" class="v-btn v-btn-ghost">🔄 Refresh Gallery</button>
+            <button id="btnRefreshGallery" class="v-btn v-btn-ghost">Refresh Gallery</button>
           </div>
 
           <div id="framesGalleryGrid" class="v-frames-gallery-grid">
@@ -454,28 +515,36 @@
               </p>
               <div class="guide-feature-grid">
                 <div class="feature-item">
-                  <div class="feature-icon">🛸</div>
+                  <div class="feature-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="10" ry="4"/><path d="M12 8v8M8 10l8 4M16 10l-8 4"/></svg>
+                  </div>
                   <div>
                     <h5>GL & Legacy Protocol Engine</h5>
                     <p>Automatically negotiates 21-byte GL or 9-byte Legacy packet formats with XOR checksums running at 25 Hz (40ms).</p>
                   </div>
                 </div>
                 <div class="feature-item">
-                  <div class="feature-icon">📡</div>
+                  <div class="feature-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6c0 0 4-4 11-4s11 4 11 4"/><path d="M5 10c0 0 3-3 7-3s7 3 7 3"/><path d="M9 14c0 0 1-1 3-1s3 1 3 1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+                  </div>
                   <div>
                     <h5>Zero-Latency FPV Video</h5>
                     <p>Decodes Motion-JPEG / H.264 streams from <code>rtsp://192.168.1.1:7070/webcam</code> with hardware accelerated PyAV demuxing.</p>
                   </div>
                 </div>
                 <div class="feature-item">
-                  <div class="feature-icon">🖼️</div>
+                  <div class="feature-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  </div>
                   <div>
                     <h5>Image Processing Pipeline</h5>
                     <p>Extract live frames directly via REST API or run <code>python process_frames.py</code> for OpenCV / AI processing.</p>
                   </div>
                 </div>
                 <div class="feature-item">
-                  <div class="feature-icon">⚖️</div>
+                  <div class="feature-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                  </div>
                   <div>
                     <h5>Sensor Trimming & Calibration</h5>
                     <p>Fine-tune Roll, Pitch, and Yaw center drifts with hardware-level offset multipliers and 6-axis gyro leveling.</p>
@@ -530,35 +599,35 @@
               <h4>All Control Buttons & Functionality</h4>
               <div class="guide-buttons-list">
                 <div class="btn-guide-row">
-                  <span class="badge-btn takeoff">🛫 TAKEOFF</span>
+                  <span class="badge-btn takeoff">TAKEOFF</span>
                   <div class="btn-guide-info">
                     <b>One-Key Auto Takeoff:</b> Sends the <code>FastFly</code> flag continuously for 1000ms. The drone spins all 4 motors, lifts off the ground, and stabilizes in hover at ~1.2 meters. Hotkey: <kbd>SPACE</kbd>.
                   </div>
                 </div>
 
                 <div class="btn-guide-row">
-                  <span class="badge-btn land">🛬 LAND</span>
+                  <span class="badge-btn land">LAND</span>
                   <div class="btn-guide-info">
                     <b>One-Key Auto Landing:</b> Sends the <code>FastDrop</code> flag for 1000ms. The drone smoothly descends until ground contact is detected, then disarms motors safely. Hotkey: <kbd>SHIFT</kbd>.
                   </div>
                 </div>
 
                 <div class="btn-guide-row">
-                  <span class="badge-btn flip">🔄 360° FLIP</span>
+                  <span class="badge-btn flip">360° FLIP</span>
                   <div class="btn-guide-info">
                     <b>Aerobatic Stunt Flip:</b> Opens the stunt direction menu (Left, Right, Front, Back). Pulses the selected axis to maximum displacement with the <code>CircleTurnEnd</code> bit for 600ms to perform a tight 360° flip. Hotkey: <kbd>F</kbd>.
                   </div>
                 </div>
 
                 <div class="btn-guide-row">
-                  <span class="badge-btn gyro">⚖️ CALIBRATE GYRO</span>
+                  <span class="badge-btn gyro">CALIBRATE GYRO</span>
                   <div class="btn-guide-info">
                     <b>6-Axis Gyroscope Calibration:</b> Sends <code>GyroCorrection</code> bit for 2000ms while holding sticks at neutral center (128). Calibrates horizontal IMU level. Drone LEDs will flash rapidly during calibration. Hotkey: <kbd>G</kbd>.
                   </div>
                 </div>
 
                 <div class="btn-guide-row">
-                  <span class="badge-btn emergency">🛑 EMERGENCY STOP</span>
+                  <span class="badge-btn emergency">EMERGENCY STOP</span>
                   <div class="btn-guide-info">
                     <b>Emergency Motor Cutoff:</b> Immediately sets <code>EmergencyStop</code> flag and cuts power to all 4 motors. Use only to prevent a crash or runaway situation. Hotkey: <kbd>ESC</kbd>.
                   </div>
@@ -569,17 +638,17 @@
             <div id="tab-modes" class="guide-panel">
               <h4>Flight Modes & Trim Tuning</h4>
               <div class="guide-card-section">
-                <h5>⚓ Altitude Hold (Fixed Height)</h5>
+                <h5>Altitude Hold (Fixed Height)</h5>
                 <p>When enabled (default), the drone uses on-board optical flow and barometric pressure sensors to maintain current altitude automatically when the throttle stick is centered.</p>
               </div>
 
               <div class="guide-card-section">
-                <h5>🧭 Headless Mode (Orientation Lock)</h5>
+                <h5>Headless Mode (Orientation Lock)</h5>
                 <p>When active, the drone's forward direction is locked to the heading it had at takeoff. Pushing Pitch forward will always move the drone away from you, regardless of which way the drone's camera is facing.</p>
               </div>
 
               <div class="guide-card-section">
-                <h5>⚡ Speed Gear Sensitivity Rates</h5>
+                <h5>Speed Gear Sensitivity Rates</h5>
                 <ul>
                   <li><b>30% (Slow / Indoor):</b> Stick range scaled to ±40 from center. Perfect for beginners and indoor precision flight.</li>
                   <li><b>60% (Medium / Standard):</b> Stick range scaled to ±60 from center. Responsive outdoor cruising with good wind resistance.</li>
@@ -596,10 +665,10 @@
             <div id="tab-camera" class="guide-panel">
               <h4>Camera, Images & Vision Processing</h4>
               <ul>
-                <li><b>🖼️ Images Studio:</b> Click the <code>[🖼️ IMAGES / DATA]</code> button to open the capture studio, view stored frames, and toggle continuous disk auto-saving.</li>
-                <li><b>📷 Lens Switch ([C]):</b> Switches between Front Lens and Bottom Optical Flow Lens via UDP packet <code>[0x06, 0x01]</code> / <code>[0x06, 0x02]</code>.</li>
-                <li><b>🐍 Python CV Pipeline:</b> Run <code>python process_frames.py</code> to pull live frames for OpenCV / PyTorch / YOLO / NumPy processing.</li>
-                <li><b>📸 Quick Save ([P]):</b> Instantly captures and saves the live frame to <code>./camera_data/</code>.</li>
+                <li><b>Images Studio:</b> Click the <code>[IMAGES / DATA]</code> button to open the capture studio, view stored frames, and toggle continuous disk auto-saving.</li>
+                <li><b>Lens Switch ([C]):</b> Switches between Front Lens and Bottom Optical Flow Lens via UDP packet <code>[0x06, 0x01]</code> / <code>[0x06, 0x02]</code>.</li>
+                <li><b>Python CV Pipeline:</b> Run <code>python process_frames.py</code> to pull live frames for OpenCV / PyTorch / YOLO / NumPy processing.</li>
+                <li><b>Quick Save ([P]):</b> Instantly captures and saves the live frame to <code>./camera_data/</code>.</li>
               </ul>
             </div>
 
@@ -637,7 +706,10 @@
                     <tr><td>360° Stunt Flip</td><td><kbd>F</kbd></td><td>Right Shoulder (RB / R1)</td></tr>
                     <tr><td>Gyro Calibration</td><td><kbd>G</kbd></td><td>Left Shoulder (LB / L1)</td></tr>
                     <tr><td>Dual Camera Switch</td><td><kbd>C</kbd></td><td>D-Pad Up</td></tr>
-                    <tr><td>Gear 30% / 60% / 100%</td><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>D-Pad Left / Down / Right</td></tr>
+                    <tr><td>Rotate Feed (+90°)</td><td><kbd>R</kbd></td><td>D-Pad Right</td></tr>
+                    <tr><td>Invert Feed (V-Flip)</td><td><kbd>V</kbd></td><td>D-Pad Down</td></tr>
+                    <tr><td>Mirror Feed (H-Flip)</td><td><kbd>H</kbd></td><td>D-Pad Left</td></tr>
+                    <tr><td>Gear 30% / 60% / 100%</td><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td><td>Button X / Y</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -707,9 +779,9 @@
               </div>
               <textarea id="mission-script-editor" class="mission-textarea" spellcheck="false" placeholder="# Enter flight commands..."></textarea>
               <div class="editor-actions">
-                <button id="btn-save-mission" class="v-btn v-btn-secondary">💾 Save Script</button>
-                <button id="btn-abort-mission" class="v-btn v-btn-danger">🛑 EMERGENCY ABORT</button>
-                <button id="btn-run-mission" class="v-btn v-btn-primary">▶️ RUN MISSION SCRIPT</button>
+                <button id="btn-save-mission" class="v-btn v-btn-secondary">Save Script</button>
+                <button id="btn-abort-mission" class="v-btn v-btn-danger">EMERGENCY ABORT</button>
+                <button id="btn-run-mission" class="v-btn v-btn-primary">RUN MISSION SCRIPT</button>
               </div>
             </div>
 
@@ -735,7 +807,7 @@
           <!-- BOTTOM: INTERACTIVE FLIGHT SCRIPT COMMAND GUIDE & DICTIONARY -->
           <details class="script-guide-accordion" open>
             <summary class="script-guide-summary">
-              <span>📖 Flight Script Commands Reference Guide (Click to Toggle)</span>
+              <span>Flight Script Commands Reference Guide (Click to Toggle)</span>
               <span class="guide-toggle-hint">All 11 Commands &amp; Parameters</span>
             </summary>
             <div class="script-guide-grid">
@@ -815,7 +887,7 @@
           </div>
 
           <button id="btnSaveConfig" class="v-btn v-btn-primary full-width">
-            💾 Save Settings & Reconnect
+            Save Settings & Reconnect
           </button>
         </div>
       </div>
