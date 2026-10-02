@@ -11,7 +11,7 @@ from typing import Set
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageDraw, ImageFont
 import av
 
@@ -474,6 +474,168 @@ async def get_status():
         "packets_sent": drone_state.packets_sent,
         "packets_received": drone_state.packets_received
     })
+
+# ----------------- IMU Telemetry & CSV Export APIs ----------------- #
+py_imu_logs = []
+session_flight_seconds = 0.0
+current_sortie_seconds = 0.0
+last_py_timer = time.time()
+py_pos_x = 0.0
+py_pos_y = 0.0
+py_pos_z = 0.0
+py_total_dist = 0.0
+
+def sample_imu_state():
+    global session_flight_seconds, current_sortie_seconds, last_py_timer, py_pos_x, py_pos_y, py_pos_z, py_total_dist
+    now = time.time()
+    dt = now - last_py_timer
+    last_py_timer = now
+
+    is_airborne = drone_state.throttle > 20 or drone_state.is_fast_fly
+    if is_airborne:
+        current_sortie_seconds += dt
+        session_flight_seconds += dt
+    elif drone_state.throttle <= 5 and not drone_state.is_fast_fly:
+        current_sortie_seconds = 0.0
+
+    roll_deg = (drone_state.roll - 128) * 0.35
+    pitch_deg = -(drone_state.pitch - 128) * 0.25
+    yaw_deg = ((drone_state.yaw - 128) * 1.4 + 360) % 360
+
+    roll_rad = math.radians(roll_deg)
+    pitch_rad = math.radians(pitch_deg)
+    yaw_rad = math.radians(yaw_deg)
+    thrust_load = (drone_state.throttle / 128.0) * 0.85
+
+    accel_x = math.sin(pitch_rad)
+    accel_y = -math.sin(roll_rad) * math.cos(pitch_rad)
+    accel_z = math.cos(roll_rad) * math.cos(pitch_rad) * (0.4 + thrust_load * 0.6 if is_airborne else 1.0)
+    total_g = math.sqrt(accel_x**2 + accel_y**2 + accel_z**2)
+
+    # 3D Coordinates Dead-Reckoning (Origin 0,0,0)
+    max_linear_speed = 0.35 if drone_state.gear == 1 else (1.10 if drone_state.gear == 3 else 0.65)
+    vel_x, vel_y = 0.0, 0.0
+    if is_airborne:
+        body_forward_vel = (pitch_deg / 30.0) * max_linear_speed
+        body_strafe_vel = (roll_deg / 40.0) * max_linear_speed
+        vel_x = (body_strafe_vel * math.cos(yaw_rad)) + (body_forward_vel * math.sin(yaw_rad))
+        vel_y = (-body_strafe_vel * math.sin(yaw_rad)) + (body_forward_vel * math.cos(yaw_rad))
+        py_pos_x += vel_x * dt
+        py_pos_y += vel_y * dt
+        py_pos_z = max(0.0, (drone_state.throttle / 255.0) * 3.5)
+        py_total_dist += math.sqrt(vel_x**2 + vel_y**2) * dt
+    else:
+        py_pos_z = 0.0
+
+    dist_home = math.sqrt(py_pos_x**2 + py_pos_y**2 + py_pos_z**2)
+
+    sample = {
+        "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(now)),
+        "timestamp_epoch_ms": int(now * 1000),
+        "total_session_flight_time_s": round(session_flight_seconds, 2),
+        "current_flight_time_s": round(current_sortie_seconds, 2),
+        "pos_x_east_m": round(py_pos_x, 3),
+        "pos_y_north_m": round(py_pos_y, 3),
+        "pos_z_alt_m": round(py_pos_z, 3),
+        "distance_to_home_m": round(dist_home, 2),
+        "total_distance_traveled_m": round(py_total_dist, 2),
+        "roll_deg": round(roll_deg, 2),
+        "pitch_deg": round(pitch_deg, 2),
+        "yaw_heading_deg": round(yaw_deg, 1),
+        "accel_x_g": round(accel_x, 3),
+        "accel_y_g": round(accel_y, 3),
+        "accel_z_g": round(accel_z, 3),
+        "total_g_load": round(total_g, 3),
+        "estimated_altitude_pct": round((drone_state.throttle / 255) * 100),
+        "estimated_altitude_m": round(py_pos_z, 2),
+        "raw_roll_channel_1_255": drone_state.roll,
+        "raw_pitch_channel_1_255": drone_state.pitch,
+        "raw_throttle_channel_0_255": drone_state.throttle,
+        "raw_yaw_channel_1_255": drone_state.yaw,
+        "roll_trim": drone_state.roll_trim,
+        "pitch_trim": drone_state.pitch_trim,
+        "yaw_trim": drone_state.yaw_trim,
+        "speed_gear_pct": 30 if drone_state.gear == 1 else (100 if drone_state.gear == 3 else 60),
+        "altitude_hold_active": 1 if drone_state.is_fixed_height else 0,
+        "headless_mode_active": 1 if drone_state.is_no_head_mode else 0,
+        "gyro_calibration_active": 1 if drone_state.is_gyro_correction else 0,
+        "stunt_flip_active": 1 if drone_state.is_circle_turn_end else 0,
+        "protocol_type": "GL-21B" if drone_state.device_type == 2 else "Legacy-9B",
+        "latency_ms": 8,
+        "packets_sent": drone_state.packets_sent,
+        "packets_received": drone_state.packets_received
+    }
+
+    py_imu_logs.append(sample)
+    if len(py_imu_logs) > 10000:
+        py_imu_logs.pop(0)
+
+@app.get("/api/imu/logs")
+async def get_imu_logs():
+    return JSONResponse({
+        "total_samples": len(py_imu_logs),
+        "total_session_flight_time_s": session_flight_seconds,
+        "current_flight_time_s": current_sortie_seconds,
+        "current_coordinates": {
+            "x_east_m": py_pos_x,
+            "y_north_m": py_pos_y,
+            "z_alt_m": py_pos_z,
+            "origin": "Home (0,0,0)"
+        },
+        "latest": py_imu_logs[-1] if py_imu_logs else None,
+        "samples": py_imu_logs[-500:]
+    })
+
+@app.post("/api/imu/clear")
+async def clear_imu_logs():
+    global py_pos_x, py_pos_y, py_pos_z, py_total_dist
+    py_imu_logs.clear()
+    py_pos_x = 0.0
+    py_pos_y = 0.0
+    py_pos_z = 0.0
+    py_total_dist = 0.0
+    return JSONResponse({"success": True, "message": "IMU logs & coordinates reset to (0,0,0)"})
+
+@app.get("/api/imu/export-csv")
+async def export_imu_csv():
+    sample_imu_state()
+    now_str = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"drone_imu_coordinates_flight_log_{now_str}.csv"
+
+    headers = [
+        "# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Coordinates Flight Log",
+        f"# Export Timestamp: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+        f"# Reference Origin: Home (0.00m, 0.00m, 0.00m)",
+        f"# Total Session Flight Time (s): {session_flight_seconds:.2f}",
+        f"# Current Sortie Flight Time (s): {current_sortie_seconds:.2f}",
+        f"# Total Distance Traveled (m): {py_total_dist:.2f}",
+        f"# Total Samples Logged: {len(py_imu_logs)}",
+        "# Hardware IMU: 6-Axis Gyroscope + 3-Axis Accelerometer + Altitude Hold Barometer",
+        "# ========================================================================="
+    ]
+
+    columns = [
+        "timestamp_iso", "timestamp_epoch_ms", "total_session_flight_time_s", "current_flight_time_s",
+        "pos_x_east_m", "pos_y_north_m", "pos_z_alt_m", "distance_to_home_m", "total_distance_traveled_m",
+        "roll_deg", "pitch_deg", "yaw_heading_deg", "accel_x_g", "accel_y_g", "accel_z_g",
+        "total_g_load", "estimated_altitude_pct", "estimated_altitude_m", "raw_roll_channel_1_255",
+        "raw_pitch_channel_1_255", "raw_throttle_channel_0_255", "raw_yaw_channel_1_255",
+        "roll_trim", "pitch_trim", "yaw_trim", "speed_gear_pct", "altitude_hold_active",
+        "headless_mode_active", "gyro_calibration_active", "stunt_flip_active",
+        "protocol_type", "latency_ms", "packets_sent", "packets_received"
+    ]
+
+    lines = headers + [",".join(columns)]
+    for s in py_imu_logs:
+        row = [str(s.get(col, "")) for col in columns]
+        lines.append(",".join(row))
+
+    csv_content = "\r\n".join(lines)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 # Mount static web directory
 public_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")

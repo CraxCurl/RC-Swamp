@@ -1,34 +1,18 @@
 /**
- * Drone HUD & Artificial Horizon Canvas Renderer — Vercel / Geist Edition
- * Renders ultra-crisp, high-DPI pitch ladder, roll horizon, aircraft crosshair, and heading compass.
+ * Drone HUD & Artificial Horizon Instrument Renderer — Vercel / Geist Edition
+ * Renders both the Cockpit FPV Overlay HUD and the 3D Circular Attitude Indicator Sphere.
  */
+
 class DroneHUD {
   constructor(canvasId) {
     this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d');
-    this.roll = 0;   // Roll angle in degrees (-45..45)
-    this.pitch = 0;  // Pitch angle in degrees (-30..30)
-    this.yaw = 0;    // Heading in degrees (0..360)
+    if (this.canvas) {
+      this.ctx = this.canvas.getContext('2d');
+    }
+    this.roll = 0;   // Degrees (-45..45)
+    this.pitch = 0;  // Degrees (-30..30)
+    this.yaw = 0;    // Degrees (0..360)
     this.altitude = 0;
-    this.dpr = window.devicePixelRatio || 1;
-    
-    this.resize();
-    window.addEventListener('resize', () => this.resize());
-  }
-
-  resize() {
-    if (!this.canvas || !this.canvas.parentElement) return;
-    this.dpr = window.devicePixelRatio || 1;
-    this.width = this.canvas.parentElement.clientWidth;
-    this.height = this.canvas.parentElement.clientHeight;
-
-    this.canvas.width = this.width * this.dpr;
-    this.canvas.height = this.height * this.dpr;
-    this.canvas.style.width = `${this.width}px`;
-    this.canvas.style.height = `${this.height}px`;
-
-    this.ctx.resetTransform();
-    this.ctx.scale(this.dpr, this.dpr);
   }
 
   updateAttitude(rollVal, pitchVal, yawVal, throttleVal) {
@@ -38,135 +22,107 @@ class DroneHUD {
     this.altitude = (throttleVal / 255) * 100.0;
   }
 
-  clear() {
-    this.ctx.clearRect(0, 0, this.width, this.height);
-  }
-
-  render() {
-    const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
+  static renderAttitudeSphere(canvas, rollDeg, pitchDeg) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
     const cx = w / 2;
     const cy = h / 2;
+    const r = (w / 2) - 3;
 
     ctx.clearRect(0, 0, w, h);
 
-    // Dynamic Horizon Layer
+    // 1. Clip to circular horizon sphere
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+
+    // 2. Rotate & Translate according to Roll and Pitch
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate((this.roll * Math.PI) / 180);
+    ctx.rotate((rollDeg * Math.PI) / 180);
 
-    const pitchPx = this.pitch * 5;
+    const pitchPx = pitchDeg * 2.2;
 
-    // Sleek Artificial Horizon Line (Vercel Monochrome with subtle blue level indicator)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.lineWidth = 1.5;
+    // Vercel Sky Gradient (Deep Indigo-Black to Slate Blue)
+    const skyGrad = ctx.createLinearGradient(0, pitchPx - r * 1.5, 0, pitchPx);
+    skyGrad.addColorStop(0, '#030712');
+    skyGrad.addColorStop(0.7, '#0f172a');
+    skyGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(-w, pitchPx - h * 2, w * 2, h * 2);
 
+    // Vercel Ground Gradient (Dark Graphite to Pitch Black)
+    const groundGrad = ctx.createLinearGradient(0, pitchPx, 0, pitchPx + r * 1.5);
+    groundGrad.addColorStop(0, '#18181b');
+    groundGrad.addColorStop(0.6, '#09090b');
+    groundGrad.addColorStop(1, '#000000');
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(-w, pitchPx, w * 2, h * 2);
+
+    // Horizon Line (Pure White / Electric Blue Level)
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.moveTo(-130, pitchPx);
-    ctx.lineTo(-40, pitchPx);
-    ctx.moveTo(40, pitchPx);
-    ctx.lineTo(130, pitchPx);
+    ctx.moveTo(-w, pitchPx);
+    ctx.lineTo(w, pitchPx);
     ctx.stroke();
 
-    // Center Level Notches
-    ctx.beginPath();
-    ctx.moveTo(-40, pitchPx);
-    ctx.lineTo(-40, pitchPx + 5);
-    ctx.moveTo(40, pitchPx);
-    ctx.lineTo(40, pitchPx + 5);
-    ctx.stroke();
-
-    // Pitch Ladder Bars
-    for (let deg = -30; deg <= 30; deg += 10) {
-      if (deg === 0) continue;
-      const y = pitchPx - deg * 5;
-      const barLen = deg % 20 === 0 ? 40 : 26;
-
-      ctx.beginPath();
-      ctx.strokeStyle = deg > 0 ? 'rgba(0, 112, 243, 0.65)' : 'rgba(245, 158, 11, 0.65)';
-      ctx.lineWidth = 1;
-
-      // Left tick
-      ctx.moveTo(-barLen, y);
-      ctx.lineTo(-18, y);
-      // Right tick
-      ctx.moveTo(18, y);
-      ctx.lineTo(barLen, y);
-      ctx.stroke();
-
-      // Pitch angle text
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.font = '10px "Geist Mono", "JetBrains Mono", monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(Math.abs(deg).toString(), -barLen - 6, y + 3.5);
-      ctx.textAlign = 'left';
-      ctx.fillText(Math.abs(deg).toString(), barLen + 6, y + 3.5);
-    }
-
-    ctx.restore();
-
-    // Stationary Center Aircraft Crosshair
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.lineWidth = 1.5;
-
-    // Precision Center Dot
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Subtle aircraft reticle wings
-    ctx.beginPath();
-    ctx.moveTo(cx - 24, cy);
-    ctx.lineTo(cx - 7, cy);
-    ctx.moveTo(cx + 7, cy);
-    ctx.lineTo(cx + 24, cy);
-    ctx.moveTo(cx, cy - 7);
-    ctx.lineTo(cx, cy - 2);
-    ctx.stroke();
-    ctx.restore();
-
-    // Top Heading Compass Tape
-    this.renderCompass(ctx, cx, 24);
-  }
-
-  renderCompass(ctx, cx, cy) {
-    ctx.save();
-    
-    // Sleek dark glass capsule
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    // Pitch Ladder Lines (+10, -10, +20, -20)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
     ctx.lineWidth = 1;
-    
-    const pillW = 120;
-    const pillH = 24;
-    ctx.beginPath();
-    ctx.roundRect(cx - pillW / 2, cy - pillH / 2, pillW, pillH, 6);
-    ctx.fill();
-    ctx.stroke();
-
-    // Heading readout text
-    ctx.fillStyle = '#ededed';
-    ctx.font = '10px "Geist Mono", "JetBrains Mono", monospace';
+    ctx.font = '9px "Geist Mono", "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const currentYaw = Math.round(this.yaw);
-    ctx.fillText(`${currentYaw}° HDG`, cx, cy);
+    const pitchBars = [
+      { deg: 10, label: '+10°' },
+      { deg: -10, label: '-10°' },
+      { deg: 20, label: '+20°' },
+      { deg: -20, label: '-20°' }
+    ];
 
-    // Accent indicator needle
+    pitchBars.forEach(({ deg, label }) => {
+      const y = pitchPx - (deg * 2.2);
+      ctx.beginPath();
+      ctx.moveTo(-32, y);
+      ctx.lineTo(-12, y);
+      ctx.moveTo(12, y);
+      ctx.lineTo(32, y);
+      ctx.stroke();
+
+      ctx.fillText(label, -44, y);
+      ctx.fillText(label, 44, y);
+    });
+
+    ctx.restore(); // Restore roll/pitch transformation
+
+    // 3. Fixed White/Yellow Aircraft Reticle Symbol (Center)
+    ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = '#0070f3';
-    ctx.beginPath();
-    ctx.moveTo(cx, cy + pillH / 2);
-    ctx.lineTo(cx - 3, cy + pillH / 2 + 4);
-    ctx.lineTo(cx + 3, cy + pillH / 2 + 4);
-    ctx.closePath();
-    ctx.fill();
+    ctx.lineWidth = 2;
 
-    ctx.restore();
+    // Center dot/circle
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Left wing
+    ctx.beginPath();
+    ctx.moveTo(cx - 28, cy);
+    ctx.lineTo(cx - 8, cy);
+    ctx.stroke();
+
+    // Right wing
+    ctx.beginPath();
+    ctx.moveTo(cx + 8, cy);
+    ctx.lineTo(cx + 28, cy);
+    ctx.stroke();
+
+    ctx.restore(); // Restore clip
   }
 }
-
-window.DroneHUD = DroneHUD;

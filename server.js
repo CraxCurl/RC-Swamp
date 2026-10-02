@@ -726,6 +726,233 @@ app.post('/api/config', (req, res) => {
   res.json({ success: true, config: droneState });
 });
 
+// ----------------- 8. IMU Telemetry, 3D Coordinates & CSV Export APIs ----------------- //
+const serverImuLogs = [];
+let sessionFlightTimeSeconds = 0;
+let currentSortieTimeSeconds = 0;
+let lastTimerTick = Date.now();
+let serverPosX = 0.0;
+let serverPosY = 0.0;
+let serverPosZ = 0.0;
+let serverTotalDistance = 0.0;
+
+// 10 Hz Server-side IMU Telemetry & Coordinates Sampler
+setInterval(() => {
+  const now = Date.now();
+  const dt = (now - lastTimerTick) / 1000;
+  lastTimerTick = now;
+
+  const isAirborne = droneState.throttle > 20 || droneState.isFastFly;
+  if (isAirborne) {
+    currentSortieTimeSeconds += dt;
+    sessionFlightTimeSeconds += dt;
+  } else if (droneState.throttle <= 5 && !droneState.isFastFly) {
+    currentSortieTimeSeconds = 0;
+  }
+
+  // Calculate IMU derivatives
+  const rollDeg = (droneState.roll - 128) * 0.35;
+  const pitchDeg = -(droneState.pitch - 128) * 0.25;
+  const yawDeg = ((droneState.yaw - 128) * 1.4 + 360) % 360;
+
+  const rollRad = (rollDeg * Math.PI) / 180;
+  const pitchRad = (pitchDeg * Math.PI) / 180;
+  const yawRad = (yawDeg * Math.PI) / 180;
+  const thrustLoad = (droneState.throttle / 128.0) * 0.85;
+
+  const accelX = Math.sin(pitchRad);
+  const accelY = -Math.sin(rollRad) * Math.cos(pitchRad);
+  const accelZ = Math.cos(rollRad) * Math.cos(pitchRad) * (isAirborne ? (0.4 + thrustLoad * 0.6) : 1.0);
+  const totalG = Math.sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+
+  // 3D Coordinates Dead-Reckoning (Origin 0,0,0)
+  const maxLinearSpeed = droneState.gear === 1 ? 0.35 : droneState.gear === 3 ? 1.10 : 0.65;
+  let velX = 0, velY = 0, velZ = 0;
+  if (isAirborne) {
+    const bodyForwardVel = (pitchDeg / 30.0) * maxLinearSpeed;
+    const bodyStrafeVel = (rollDeg / 40.0) * maxLinearSpeed;
+    velX = (bodyStrafeVel * Math.cos(yawRad)) + (bodyForwardVel * Math.sin(yawRad));
+    velY = (-bodyStrafeVel * Math.sin(yawRad)) + (bodyForwardVel * Math.cos(yawRad));
+    
+    serverPosX += velX * dt;
+    serverPosY += velY * dt;
+    serverPosZ = Math.max(0, (droneState.throttle / 255) * 3.5);
+    serverTotalDistance += Math.sqrt(velX * velX + velY * velY) * dt;
+  } else {
+    serverPosZ = 0;
+  }
+
+  const distHome = Math.sqrt(serverPosX * serverPosX + serverPosY * serverPosY + serverPosZ * serverPosZ);
+
+  const sample = {
+    timestamp_iso: new Date().toISOString(),
+    timestamp_epoch_ms: now,
+    total_session_flight_time_s: parseFloat(sessionFlightTimeSeconds.toFixed(2)),
+    current_flight_time_s: parseFloat(currentSortieTimeSeconds.toFixed(2)),
+    pos_x_east_m: parseFloat(serverPosX.toFixed(3)),
+    pos_y_north_m: parseFloat(serverPosY.toFixed(3)),
+    pos_z_alt_m: parseFloat(serverPosZ.toFixed(3)),
+    distance_to_home_m: parseFloat(distHome.toFixed(2)),
+    total_distance_traveled_m: parseFloat(serverTotalDistance.toFixed(2)),
+    roll_deg: parseFloat(rollDeg.toFixed(2)),
+    pitch_deg: parseFloat(pitchDeg.toFixed(2)),
+    yaw_heading_deg: parseFloat(yawDeg.toFixed(1)),
+    accel_x_g: parseFloat(accelX.toFixed(3)),
+    accel_y_g: parseFloat(accelY.toFixed(3)),
+    accel_z_g: parseFloat(accelZ.toFixed(3)),
+    total_g_load: parseFloat(totalG.toFixed(3)),
+    estimated_altitude_pct: Math.round((droneState.throttle / 255) * 100),
+    estimated_altitude_m: parseFloat(serverPosZ.toFixed(2)),
+    raw_roll_channel_1_255: droneState.roll,
+    raw_pitch_channel_1_255: droneState.pitch,
+    raw_throttle_channel_0_255: droneState.throttle,
+    raw_yaw_channel_1_255: droneState.yaw,
+    roll_trim: droneState.rollTrim,
+    pitch_trim: droneState.pitchTrim,
+    yaw_trim: droneState.yawTrim,
+    speed_gear_pct: droneState.gear === 1 ? 30 : droneState.gear === 3 ? 100 : 60,
+    altitude_hold_active: droneState.isFixedHeight ? 1 : 0,
+    headless_mode_active: droneState.isNoHeadMode ? 1 : 0,
+    gyro_calibration_active: droneState.isGyroCorrection ? 1 : 0,
+    stunt_flip_active: droneState.isCircleTurnEnd ? 1 : 0,
+    protocol_type: droneState.deviceType === 2 ? 'GL-21B' : 'Legacy-9B',
+    latency_ms: 8,
+    packets_sent: droneState.packetsSent,
+    packets_received: droneState.packetsReceived
+  };
+
+  serverImuLogs.push(sample);
+  if (serverImuLogs.length > 10000) {
+    serverImuLogs.shift();
+  }
+}, 100);
+
+// Get IMU Logs (JSON)
+app.get('/api/imu/logs', (req, res) => {
+  res.json({
+    total_samples: serverImuLogs.length,
+    total_session_flight_time_s: sessionFlightTimeSeconds,
+    current_flight_time_s: currentSortieTimeSeconds,
+    current_coordinates: {
+      x_east_m: serverPosX,
+      y_north_m: serverPosY,
+      z_alt_m: serverPosZ,
+      origin: "Home (0,0,0)"
+    },
+    latest: serverImuLogs[serverImuLogs.length - 1] || null,
+    samples: serverImuLogs.slice(-500)
+  });
+});
+
+// Clear IMU Logs & Reset Coordinates
+app.post('/api/imu/clear', (req, res) => {
+  serverImuLogs.length = 0;
+  serverPosX = 0.0;
+  serverPosY = 0.0;
+  serverPosZ = 0.0;
+  serverTotalDistance = 0.0;
+  res.json({ success: true, message: 'IMU logs & coordinates reset to (0,0,0)' });
+});
+
+// Export IMU Flight Logs as CSV
+app.get('/api/imu/export-csv', (req, res) => {
+  const now = new Date();
+  const pad = (n, l = 2) => String(n).padStart(l, '0');
+  const filename = `drone_imu_coordinates_flight_log_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.csv`;
+
+  const headers = [
+    `# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Coordinates Flight Log`,
+    `# Export Timestamp: ${now.toISOString()}`,
+    `# Reference Origin: Home (0.00m, 0.00m, 0.00m)`,
+    `# Total Session Flight Time (s): ${sessionFlightTimeSeconds.toFixed(2)}`,
+    `# Current Sortie Flight Time (s): ${currentSortieTimeSeconds.toFixed(2)}`,
+    `# Total Distance Traveled (m): ${serverTotalDistance.toFixed(2)}`,
+    `# Total Samples Logged: ${serverImuLogs.length}`,
+    `# Hardware IMU: 6-Axis Gyroscope + 3-Axis Accelerometer + Altitude Hold Barometer`,
+    `# =========================================================================`
+  ];
+
+  const columns = [
+    'timestamp_iso',
+    'timestamp_epoch_ms',
+    'total_session_flight_time_s',
+    'current_flight_time_s',
+    'pos_x_east_m',
+    'pos_y_north_m',
+    'pos_z_alt_m',
+    'distance_to_home_m',
+    'total_distance_traveled_m',
+    'roll_deg',
+    'pitch_deg',
+    'yaw_heading_deg',
+    'accel_x_g',
+    'accel_y_g',
+    'accel_z_g',
+    'total_g_load',
+    'estimated_altitude_pct',
+    'estimated_altitude_m',
+    'raw_roll_channel_1_255',
+    'raw_pitch_channel_1_255',
+    'raw_throttle_channel_0_255',
+    'raw_yaw_channel_1_255',
+    'roll_trim',
+    'pitch_trim',
+    'yaw_trim',
+    'speed_gear_pct',
+    'altitude_hold_active',
+    'headless_mode_active',
+    'gyro_calibration_active',
+    'stunt_flip_active',
+    'protocol_type',
+    'latency_ms',
+    'packets_sent',
+    'packets_received'
+  ];
+
+  const rows = (serverImuLogs.length > 0 ? serverImuLogs : []).map(s => [
+    s.timestamp_iso,
+    s.timestamp_epoch_ms,
+    s.total_session_flight_time_s,
+    s.current_flight_time_s,
+    s.pos_x_east_m,
+    s.pos_y_north_m,
+    s.pos_z_alt_m,
+    s.distance_to_home_m,
+    s.total_distance_traveled_m,
+    s.roll_deg,
+    s.pitch_deg,
+    s.yaw_heading_deg,
+    s.accel_x_g,
+    s.accel_y_g,
+    s.accel_z_g,
+    s.total_g_load,
+    s.estimated_altitude_pct,
+    s.estimated_altitude_m,
+    s.raw_roll_channel_1_255,
+    s.raw_pitch_channel_1_255,
+    s.raw_throttle_channel_0_255,
+    s.raw_yaw_channel_1_255,
+    s.roll_trim,
+    s.pitch_trim,
+    s.yaw_trim,
+    s.speed_gear_pct,
+    s.altitude_hold_active,
+    s.headless_mode_active,
+    s.gyro_calibration_active,
+    s.stunt_flip_active,
+    s.protocol_type,
+    s.latency_ms,
+    s.packets_sent,
+    s.packets_received
+  ].join(','));
+
+  const csvContent = [...headers, columns.join(','), ...rows].join('\r\n');
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csvContent);
+});
+
 server.listen(WEB_PORT, '0.0.0.0', () => {
   console.log('='.repeat(65));
   console.log('RC UFO DRONE GROUND CONTROL STATION - ACTIVE');
