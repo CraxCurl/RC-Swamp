@@ -151,99 +151,101 @@ class DroneHUD {
     ctx.save();
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Sky & Ground Horizon Background
+    // 1. Sky & Ground Horizon Background (Vibrant High-Contrast Tactical Palettes)
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate((-rollDeg * Math.PI) / 180);
 
-    const pitchPx = pitchDeg * 3.5;
+    const pitchPx = pitchDeg * 4.0;
 
-    // Deep Tactical FPV Sky Gradient
+    // Tactical Midnight Blue FPV Sky Gradient
     const skyGrad = ctx.createLinearGradient(0, pitchPx - h * 1.5, 0, pitchPx);
-    skyGrad.addColorStop(0, '#020617');
-    skyGrad.addColorStop(0.7, '#0f172a');
-    skyGrad.addColorStop(1, '#1e293b');
+    skyGrad.addColorStop(0, '#061937');
+    skyGrad.addColorStop(0.5, '#0c2b52');
+    skyGrad.addColorStop(0.85, '#164273');
+    skyGrad.addColorStop(1, '#1d538c');
     ctx.fillStyle = skyGrad;
-    ctx.fillRect(-w * 1.5, pitchPx - h * 3, w * 3, h * 3);
+    ctx.fillRect(-w * 2, pitchPx - h * 3, w * 4, h * 3);
 
-    // Deep Tactical FPV Terrain Gradient
+    // Tactical Topographic Dark Emerald Terrain Gradient
     const groundGrad = ctx.createLinearGradient(0, pitchPx, 0, pitchPx + h * 1.5);
-    groundGrad.addColorStop(0, '#0a1f18');
-    groundGrad.addColorStop(0.5, '#061712');
-    groundGrad.addColorStop(1, '#020b08');
+    groundGrad.addColorStop(0, '#0e4a33');
+    groundGrad.addColorStop(0.35, '#093826');
+    groundGrad.addColorStop(0.7, '#052418');
+    groundGrad.addColorStop(1, '#02120b');
     ctx.fillStyle = groundGrad;
-    ctx.fillRect(-w * 1.5, pitchPx, w * 3, h * 3);
+    ctx.fillRect(-w * 2, pitchPx, w * 4, h * 3);
 
-    // Horizon Line (Neon Cyan Glow)
-    ctx.strokeStyle = '#00ffcc';
-    ctx.shadowColor = '#00ffcc';
-    ctx.shadowBlur = 8;
-    ctx.lineWidth = 2;
+    // Bright Glowing Horizon Line
+    ctx.strokeStyle = '#00f0ff';
+    ctx.shadowColor = '#00f0ff';
+    ctx.shadowBlur = 10;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(-w * 1.5, pitchPx);
-    ctx.lineTo(w * 1.5, pitchPx);
+    ctx.moveTo(-w * 2, pitchPx);
+    ctx.lineTo(w * 2, pitchPx);
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Perspective Terrain Grid Lines
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.18)';
-    ctx.lineWidth = 1;
-    const gridSpeedOffset = (tick * 80 * (speedMs + 0.5)) % 60;
-    for (let gy = 20; gy < h; gy += 30) {
+    // Perspective Terrain Grid Lines (Vibrant Cyan, 45% Opacity)
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.45)';
+    ctx.lineWidth = 1.2;
+    const gridSpeedOffset = (tick * 90 * (speedMs + 0.6)) % 40;
+    for (let gy = 15; gy < h * 1.2; gy += 25) {
       const yLine = pitchPx + gy + (gridSpeedOffset * (gy / h));
       if (yLine > pitchPx) {
         ctx.beginPath();
-        ctx.moveTo(-w * 1.5, yLine);
-        ctx.lineTo(w * 1.5, yLine);
+        ctx.moveTo(-w * 2, yLine);
+        ctx.lineTo(w * 2, yLine);
         ctx.stroke();
       }
     }
 
     // Radial Perspective Vanishing Lines
-    for (let vx = -w; vx <= w; vx += 70) {
+    for (let vx = -w * 1.5; vx <= w * 1.5; vx += 60) {
       ctx.beginPath();
       ctx.moveTo(0, pitchPx);
-      ctx.lineTo(vx * 2.5, pitchPx + h * 2);
+      ctx.lineTo(vx * 3.0, pitchPx + h * 2.5);
       ctx.stroke();
     }
 
     // Dynamic Pitch Ladder (+30, +20, +10, -10, -20, -30)
-    ctx.fillStyle = 'rgba(0, 255, 204, 0.9)';
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.65)';
-    ctx.lineWidth = 1.2;
-    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#00f0ff';
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const ladderSteps = [
-      { deg: 30, text: '+30' },
-      { deg: 20, text: '+20' },
-      { deg: 10, text: '+10' },
-      { deg: -10, text: '-10' },
-      { deg: -20, text: '-20' },
-      { deg: -30, text: '-30' }
+      { deg: 30, text: '+30°' },
+      { deg: 20, text: '+20°' },
+      { deg: 10, text: '+10°' },
+      { deg: -10, text: '-10°' },
+      { deg: -20, text: '-20°' },
+      { deg: -30, text: '-30°' }
     ];
 
     ladderSteps.forEach(({ deg, text }) => {
-      const ly = pitchPx - (deg * 3.5);
+      const ly = pitchPx - (deg * 4.0);
       const isNegative = deg < 0;
-      const barW = isNegative ? 36 : 48;
+      const barW = isNegative ? 40 : 54;
 
       ctx.beginPath();
       if (isNegative) {
-        ctx.setLineDash([4, 4]);
+        ctx.setLineDash([5, 5]);
       } else {
         ctx.setLineDash([]);
       }
       ctx.moveTo(-barW, ly);
-      ctx.lineTo(-14, ly);
-      ctx.moveTo(14, ly);
+      ctx.lineTo(-16, ly);
+      ctx.moveTo(16, ly);
       ctx.lineTo(barW, ly);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.fillText(text, -barW - 14, ly);
-      ctx.fillText(text, barW + 14, ly);
+      ctx.fillText(text, -barW - 16, ly);
+      ctx.fillText(text, barW + 16, ly);
     });
 
     ctx.restore(); // Restore horizon rotation
@@ -253,44 +255,46 @@ class DroneHUD {
     ctx.strokeStyle = '#ffcc00';
     ctx.fillStyle = '#ffcc00';
     ctx.shadowColor = '#ffcc00';
-    ctx.shadowBlur = 6;
-    ctx.lineWidth = 2;
+    ctx.shadowBlur = 8;
+    ctx.lineWidth = 2.2;
 
-    // Crosshair dot
+    // Center Crosshair Dot
     ctx.beginPath();
-    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    // Wings
+    // Aircraft Target Wings
     ctx.beginPath();
-    ctx.moveTo(cx - 30, cy);
-    ctx.lineTo(cx - 10, cy);
-    ctx.moveTo(cx + 10, cy);
-    ctx.lineTo(cx + 30, cy);
-    ctx.moveTo(cx, cy - 15);
-    ctx.lineTo(cx, cy - 6);
+    ctx.moveTo(cx - 36, cy);
+    ctx.lineTo(cx - 12, cy);
+    ctx.lineTo(cx - 12, cy + 6);
+    ctx.moveTo(cx + 12, cy);
+    ctx.lineTo(cx + 36, cy);
+    ctx.lineTo(cx + 12, cy + 6);
+    ctx.moveTo(cx, cy - 18);
+    ctx.lineTo(cx, cy - 8);
     ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.restore();
 
     // 3. Top Compass Ribbon (Heading 0..360°)
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(cx - 140, 6, 280, 24);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.strokeRect(cx - 140, 6, 280, 24);
+    ctx.fillStyle = 'rgba(5, 12, 22, 0.85)';
+    ctx.fillRect(cx - 150, 6, 300, 26);
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+    ctx.strokeRect(cx - 150, 6, 300, 26);
 
-    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.font = 'bold 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#00ffcc';
+    ctx.fillStyle = '#00f0ff';
 
     const headingCardinals = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
     for (let deg = -60; deg <= 60; deg += 15) {
       const hDeg = (Math.round(yawDeg) + deg + 360) % 360;
-      const xPos = cx + (deg * 2.2);
-      if (xPos >= cx - 130 && xPos <= cx + 130) {
-        ctx.strokeStyle = deg % 30 === 0 ? 'rgba(0, 255, 204, 0.8)' : 'rgba(255, 255, 255, 0.4)';
+      const xPos = cx + (deg * 2.3);
+      if (xPos >= cx - 140 && xPos <= cx + 140) {
+        ctx.strokeStyle = deg % 30 === 0 ? '#00f0ff' : 'rgba(255, 255, 255, 0.5)';
         ctx.beginPath();
         ctx.moveTo(xPos, 22);
         ctx.lineTo(xPos, 30);
@@ -303,65 +307,73 @@ class DroneHUD {
       }
     }
 
-    // Compass Lubber Line
+    // Compass Pointer
     ctx.fillStyle = '#ffcc00';
     ctx.beginPath();
-    ctx.moveTo(cx, 30);
-    ctx.lineTo(cx - 4, 35);
-    ctx.lineTo(cx + 4, 35);
+    ctx.moveTo(cx, 31);
+    ctx.lineTo(cx - 5, 37);
+    ctx.lineTo(cx + 5, 37);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
 
     // 4. Left Airspeed Tape
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(10, cy - 65, 55, 130);
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.4)';
-    ctx.strokeRect(10, cy - 65, 55, 130);
+    ctx.fillStyle = 'rgba(5, 12, 22, 0.85)';
+    ctx.fillRect(10, cy - 70, 62, 140);
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+    ctx.strokeRect(10, cy - 70, 62, 140);
 
-    ctx.fillStyle = '#00ffcc';
+    ctx.fillStyle = '#00f0ff';
     ctx.font = '9px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('SPD m/s', 14, cy - 52);
-    ctx.font = 'bold 15px "JetBrains Mono", monospace';
+    ctx.fillText('SPD m/s', 14, cy - 55);
+    ctx.font = 'bold 16px "JetBrains Mono", monospace';
     ctx.fillText(speedMs.toFixed(1), 14, cy);
     ctx.font = '9px "JetBrains Mono", monospace';
-    ctx.fillText(`THR:${thrPct}%`, 14, cy + 48);
+    ctx.fillText(`THR:${thrPct}%`, 14, cy + 52);
     ctx.restore();
 
     // 5. Right Altitude Tape
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(w - 65, cy - 65, 55, 130);
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.4)';
-    ctx.strokeRect(w - 65, cy - 65, 55, 130);
+    ctx.fillStyle = 'rgba(5, 12, 22, 0.85)';
+    ctx.fillRect(w - 72, cy - 70, 62, 140);
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+    ctx.strokeRect(w - 72, cy - 70, 62, 140);
 
-    ctx.fillStyle = '#00ffcc';
+    ctx.fillStyle = '#00f0ff';
     ctx.font = '9px "JetBrains Mono", monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('ALT (Z)', w - 60, cy - 52);
-    ctx.font = 'bold 15px "JetBrains Mono", monospace';
-    ctx.fillText(altM.toFixed(1) + 'm', w - 60, cy);
+    ctx.fillText('ALT (Z)', w - 67, cy - 55);
+    ctx.font = 'bold 16px "JetBrains Mono", monospace';
+    ctx.fillText(altM.toFixed(1) + 'm', w - 67, cy);
     ctx.font = '9px "JetBrains Mono", monospace';
-    ctx.fillText(`${(altM * 3.28084).toFixed(0)} ft`, w - 60, cy + 48);
+    ctx.fillText(`${(altM * 3.28084).toFixed(0)} ft`, w - 67, cy + 52);
     ctx.restore();
 
-    // 6. Bottom Stream Status Legend
+    // 6. Analog CRT Scanlines & Camera Noise Overlay
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(cx - 160, h - 26, 320, 20);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.strokeRect(cx - 160, h - 26, 320, 20);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+    for (let sy = 0; sy < h; sy += 3) {
+      ctx.fillRect(0, sy, w, 1);
+    }
+    ctx.restore();
 
-    ctx.font = '9.5px "JetBrains Mono", monospace';
+    // 7. Bottom FPV Stream Status Legend
+    ctx.save();
+    ctx.fillStyle = 'rgba(5, 12, 22, 0.9)';
+    ctx.fillRect(cx - 180, h - 28, 360, 22);
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
+    ctx.strokeRect(cx - 180, h - 28, 360, 22);
+
+    ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = state.hasLiveVideo ? '#00ffcc' : '#38bdf8';
+    ctx.fillStyle = state.hasLiveVideo ? '#22c55e' : '#38bdf8';
     const statusMsg = state.hasLiveVideo 
-      ? `LIVE CAMERA FEED [${state.device_type || 'GL-21B'}] 30 FPS`
-      : `SIMULATED FPV FEED ACTIVE [READY FOR DRONE LINK]`;
-    ctx.fillText(statusMsg, cx, h - 16);
+      ? `● LIVE CAMERA FEED [${state.device_type || 'GL-21B'}] 30 FPS`
+      : `📡 FPV STANDBY — AWAITING DRONE LINK (192.168.1.1:7070)`;
+    ctx.fillText(statusMsg, cx, h - 17);
     ctx.restore();
 
     ctx.restore();

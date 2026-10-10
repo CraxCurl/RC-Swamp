@@ -360,7 +360,6 @@ document.addEventListener('DOMContentLoaded', () => {
           logTerminal('Live Video WebSocket linked', 'dim');
         };
         videoWs.onmessage = async (event) => {
-          lastVideoPacketTime = Date.now();
           if (activeVideoSource === 'webcam') return;
 
           if (window.createImageBitmap) {
@@ -370,6 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 latestFrameBitmap.close();
               }
               latestFrameBitmap = bmp;
+              lastVideoPacketTime = Date.now();
               state.hasLiveVideo = true;
               if (standbyOverlay && !standbyOverlay.classList.contains('hide')) {
                 standbyOverlay.classList.add('hide');
@@ -380,6 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const oldUrl = currentBlobUrl;
             currentBlobUrl = URL.createObjectURL(event.data);
             fallbackImg.onload = () => {
+              lastVideoPacketTime = Date.now();
               state.hasLiveVideo = true;
               if (standbyOverlay && !standbyOverlay.classList.contains('hide')) {
                 standbyOverlay.classList.add('hide');
@@ -566,6 +567,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ----------------- UNIFIED FLIGHT COMMAND DISPATCHER ----------------- //
   function dispatchFlightCommand(payload) {
+    if (!payload) return;
+
+    // Update internal state from dispatched flight commands (supports live simulation & manual controls)
+    if (payload.action === 'takeoff') {
+      state.isAirborne = true;
+      if (window.droneImu) window.droneImu.setAirborne(true);
+      if (armedStatusBadge) {
+        armedStatusBadge.className = 'badge-armed';
+        armedStatusBadge.textContent = 'ARMED / FLYING';
+      }
+    } else if (payload.action === 'land') {
+      state.isAirborne = false;
+      if (window.droneImu) window.droneImu.setAirborne(false);
+      if (armedStatusBadge) {
+        armedStatusBadge.className = 'badge-disarmed';
+        armedStatusBadge.textContent = 'DISARMED';
+      }
+    } else if (payload.action === 'stick') {
+      if (typeof payload.roll === 'number') state.roll = payload.roll;
+      if (typeof payload.pitch === 'number') state.pitch = payload.pitch;
+      if (typeof payload.throttle === 'number') state.throttle = payload.throttle;
+      if (typeof payload.yaw === 'number') state.yaw = payload.yaw;
+    }
+
     // 1. Send via Bluetooth Serial to ESP32 Bridge
     if (isEsp32Connected && esp32Writer) {
       if (payload.action === 'takeoff') {
@@ -585,10 +610,10 @@ document.addEventListener('DOMContentLoaded', () => {
         logTerminal('TX > HANDSHAKE [H]', 'out');
       } else if (payload.action === 'stick') {
         // Standard E88 8-Byte Packet: [0x66, roll, pitch, throttle, yaw, cmd, checksum, 0x99]
-        const r = payload.roll || 128;
-        const p = payload.pitch || 128;
-        const t = payload.throttle || 128;
-        const y = payload.yaw || 128;
+        const r = payload.roll !== undefined ? payload.roll : 128;
+        const p = payload.pitch !== undefined ? payload.pitch : 128;
+        const t = payload.throttle !== undefined ? payload.throttle : 128;
+        const y = payload.yaw !== undefined ? payload.yaw : 128;
         const cs = (r ^ p ^ t ^ y) & 0xFF;
         const pkt = new Uint8Array([0x66, r, p, t, y, 0x00, cs, 0x99]);
         sendEsp32Command(pkt);

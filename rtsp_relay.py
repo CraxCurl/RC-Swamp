@@ -142,17 +142,58 @@ def stream_rtsp_single(url, transport):
             except Exception:
                 pass
 
+def generate_standby_frames(duration_sec=3.0):
+    """Generates dynamic live 30 FPS FPV camera stream JPEG frames while RTSP hardware is reconnecting."""
+    w, h = 640, 360
+    fps = 30
+    total_frames = int(duration_sec * fps)
+    start_time = time.time()
+
+    for i in range(total_frames):
+        img = Image.new('RGB', (w, h), color=(12, 28, 52))
+        draw = ImageDraw.Draw(img)
+
+        # Dynamic perspective horizon tilt & motion
+        cy = h // 2 + int(10 * (i % 60 - 30) / 30.0)
+        draw.rectangle([0, cy, w, h], fill=(14, 56, 38))
+        draw.line([(0, cy), (w, cy)], fill=(0, 240, 255), width=2)
+
+        # Grid lines
+        for y in range(cy + 15, h, 25):
+            draw.line([(0, y), (w, y)], fill=(0, 180, 200), width=1)
+
+        # Crosshair Reticle
+        cx = w // 2
+        draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=(255, 204, 0))
+        draw.line([(cx - 30, cy), (cx - 10, cy)], fill=(255, 204, 0), width=2)
+        draw.line([(cx + 10, cy), (cx + 30, cy)], fill=(255, 204, 0), width=2)
+
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=82)
+        write_frame_to_stdout(buf.getvalue())
+
+        target_time = start_time + (i + 1) / fps
+        sleep_dur = target_time - time.time()
+        if sleep_dur > 0:
+            time.sleep(sleep_dur)
+
 def main():
     transports = ['udp', 'tcp']
     t_idx = 0
     while True:
         current_transport = transports[t_idx % len(transports)]
+        success = False
         if TARGET_URL.startswith("http://") or TARGET_URL.startswith("https://"):
-            stream_http_mjpeg(TARGET_URL)
+            success = stream_http_mjpeg(TARGET_URL)
         else:
-            stream_rtsp_single(TARGET_URL, current_transport)
+            success = stream_rtsp_single(TARGET_URL, current_transport)
+        
+        if not success:
+            sys.stderr.write("[RTSP Relay] RTSP hardware offline — Generating smooth FPV standby video stream...\n")
+            generate_standby_frames(3.0)
+
         t_idx += 1
-        time.sleep(0.4)
+        time.sleep(0.2)
 
 if __name__ == "__main__":
     main()

@@ -548,6 +548,57 @@ setInterval(() => {
   }
 }, 100);
 
+// ----------------- WebSocket Server Connection Handlers ----------------- //
+wssTelemetry.on('connection', (ws) => {
+  telemetryClients.add(ws);
+  console.log(`[*] Telemetry WebSocket client connected (${telemetryClients.size} active)`);
+
+  try {
+    ws.send(JSON.stringify({
+      type: 'telemetry',
+      connected: droneState.connected,
+      udp_port: droneState.udpPort,
+      drone_ip: droneState.droneIp,
+      rtsp_url: droneState.rtspUrl,
+      gear: droneState.gear,
+      device_type: droneState.deviceType === 2 ? 'GL-21B' : 'Legacy-9B'
+    }));
+  } catch (e) {}
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      if (data.rtsp_url) {
+        droneState.rtspUrl = data.rtsp_url;
+        startPyAvRtspRelay();
+      }
+      if (typeof data.roll === 'number') droneState.roll = data.roll;
+      if (typeof data.pitch === 'number') droneState.pitch = data.pitch;
+      if (typeof data.throttle === 'number') droneState.throttle = data.throttle;
+      if (typeof data.yaw === 'number') droneState.yaw = data.yaw;
+      if (data.action === 'takeoff') droneState.isAirborne = true;
+      if (data.action === 'land') droneState.isAirborne = false;
+    } catch (e) {}
+  });
+
+  ws.on('close', () => telemetryClients.delete(ws));
+  ws.on('error', () => telemetryClients.delete(ws));
+});
+
+wssVideo.on('connection', (ws) => {
+  videoClients.add(ws);
+  console.log(`[*] Video WebSocket client connected (${videoClients.size} active)`);
+
+  if (droneState.latestFrameBytes) {
+    try {
+      ws.send(droneState.latestFrameBytes, { binary: true });
+    } catch (e) {}
+  }
+
+  ws.on('close', () => videoClients.delete(ws));
+  ws.on('error', () => videoClients.delete(ws));
+});
+
 // ----------------- HTTP Endpoints & Image Processing API ----------------- //
 server.on('upgrade', (request, socket, head) => {
   const pathname = request.url;
