@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AERO-LINK — ESP32 Bridge Flight Control Station</title>
+  <title>AERO-LINK — ESP32 Bridge Flight Control Station &amp; 6-DOF IMU Telemetry</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
@@ -15,7 +15,7 @@
     <header class="aerolink-header">
       <div class="aerolink-header-left">
         <div class="aerolink-brand">
-          <div class="brand-icon-box" title="Vercel Geist Ground Control">
+          <div class="brand-icon-box" title="Aero-Link Ground Control Station">
             <svg width="15" height="15" viewBox="0 0 76 65" fill="none">
               <path d="M37.5274 0L75.0548 65H0L37.5274 0Z" fill="#FFFFFF"/>
             </svg>
@@ -62,17 +62,21 @@
           <span>CONNECT ESP32 (BT)</span>
         </button>
 
-        <button id="btnSwitchMeeting" class="btn-slate" title="Switch between FPV View and Autonomous Multi-view">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          <span>Switch to Video Meeting</span>
+        <button id="btnImuStudio" class="btn-slate btn-highlight" title="6-DOF IMU Telemetry &amp; Flight Logs [I]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span>IMU Studio [I]</span>
         </button>
 
-        <button id="btnImuStudio" class="btn-icon-slate" title="6-DOF IMU Telemetry &amp; Flight Logs [I]">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        </button>
-        <button id="btnMissions" class="btn-icon-slate" title="Autonomous Flight Script Runner [M]">
+        <button id="btnMissions" class="btn-slate" title="Autonomous Flight Instruction Programmer [M]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>Missions [M]</span>
         </button>
+
+        <button id="btnExportExcelHeader" class="btn-slate" title="Download Flight Logs as Excel Sheet (.csv) [E]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>Download Excel</span>
+        </button>
+
         <button id="btnGuide" class="btn-icon-slate" title="Flight Controls &amp; Keyboard Guide [G]">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
         </button>
@@ -109,17 +113,17 @@
             </div>
             <div class="telem-box">
               <span class="telem-label">PITCH</span>
-              <span id="dispPitchDeg" class="telem-val">0</span>
+              <span id="dispPitchDeg" class="telem-val">0°</span>
               <span id="dispPitchRaw" class="telem-sub">RAW: 128</span>
             </div>
             <div class="telem-box">
               <span class="telem-label">ROLL</span>
-              <span id="dispRollDeg" class="telem-val">0</span>
+              <span id="dispRollDeg" class="telem-val">0°</span>
               <span id="dispRollRaw" class="telem-sub">RAW: 128</span>
             </div>
             <div class="telem-box">
               <span class="telem-label">YAW</span>
-              <span id="dispYawDeg" class="telem-val">0</span>
+              <span id="dispYawDeg" class="telem-val">0°</span>
               <span id="dispYawRaw" class="telem-sub">RAW: 128</span>
             </div>
           </div>
@@ -173,6 +177,55 @@
           </button>
         </div>
 
+        <!-- CARD 3: LIVE 6-DOF IMU & 3D COORDINATES COCKPIT DECK -->
+        <div class="aero-card cockpit-imu-card">
+          <div class="card-header">
+            <div class="card-title-wrap">
+              <svg class="title-icon text-cyan" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+              <h3>6-DOF SENSORS &amp; 3D COORDS</h3>
+            </div>
+            <button id="btnCockpitZero" class="btn-slate btn-xs" title="Reset (0,0,0) Home">Set (0,0,0)</button>
+          </div>
+
+          <!-- Quick Coordinates Strip -->
+          <div class="cockpit-coords-row">
+            <div class="coord-pill pill-blue">
+              <span class="coord-lbl">X (EAST)</span>
+              <span id="mainImuPosX" class="coord-val">+0.00m</span>
+            </div>
+            <div class="coord-pill pill-green">
+              <span class="coord-lbl">Y (NORTH)</span>
+              <span id="mainImuPosY" class="coord-val">+0.00m</span>
+            </div>
+            <div class="coord-pill pill-amber">
+              <span class="coord-lbl">Z (ALT)</span>
+              <span id="mainImuPosZ" class="coord-val">0.00m</span>
+            </div>
+          </div>
+
+          <!-- Secondary Telemetry Line -->
+          <div class="cockpit-imu-subgrid">
+            <div class="c-imu-stat">
+              <span class="c-lbl">DIST HOME</span>
+              <span id="mainImuDist" class="c-val text-cyan">0.00m</span>
+            </div>
+            <div class="c-imu-stat">
+              <span class="c-lbl">SPEED</span>
+              <span id="mainImuSpeed" class="c-val text-green">0.00 m/s</span>
+            </div>
+            <div class="c-imu-stat">
+              <span class="c-lbl">G-FORCE</span>
+              <span id="mainImuGLoad" class="c-val text-amber">1.00g</span>
+            </div>
+          </div>
+
+          <div class="cockpit-imu-foot">
+            <button id="btnOpenImuFromCockpit" class="btn-slate btn-xs full-width">Open Full IMU Studio [I]</button>
+            <button id="btnCockpitExportCsv" class="btn-cyan-glow btn-xs" title="Download Excel Flight Log (.csv)">📥 Excel Log</button>
+            <button id="btnCockpitResetLogs" class="btn-slate btn-xs text-red" title="Reset Flight Log Data & Zero Origin">🗑️ Reset Log</button>
+          </div>
+        </div>
+
       </div>
 
       <!-- ==================== COLUMN 2 (CENTER) ==================== -->
@@ -183,31 +236,63 @@
           <div class="card-header">
             <div class="card-title-wrap">
               <svg class="title-icon text-cyan" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-              <h3>LIVE FPV FEED (DRONE WI-FI AP)</h3>
+              <h3>LIVE FPV FEED</h3>
             </div>
-            <button id="btnOpenStream" class="btn-slate btn-xs" title="Reconnect / Start Stream">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-              <span>Open Stream</span>
-            </button>
+            <div class="video-header-actions">
+              <!-- Dual Camera Lens Switcher (Front / Bottom) -->
+              <button id="btnToggleCameraLens" class="btn-slate btn-xs" title="Switch between Front Camera and Bottom Downward Facing Camera">
+                📷 <span id="cameraLensLabel">FRONT CAM</span>
+              </button>
+
+              <!-- Camera Feed Selector -->
+              <select id="selectCameraFeed" class="select-camera-feed" title="Change camera feed source">
+                <option value="drone_rtsp">📡 Drone RTSP (Port 7070)</option>
+                <option value="drone_http">🌐 Drone HTTP (Port 8080)</option>
+                <option value="webcam">📷 Local Webcam / USB FPV</option>
+                <option value="synthetic">🎮 Simulated Feed</option>
+                <option value="custom">⚙️ Custom Stream URL...</option>
+              </select>
+
+              <!-- Capture Photo Button (Square Icon) -->
+              <button id="btnCapturePhoto" class="btn-icon-sq" title="Capture Photo / Snapshot">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </button>
+
+              <!-- Record Video Button (Square Icon) -->
+              <button id="btnRecordVideo" class="btn-icon-sq" title="Start / Stop Video Recording">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7" fill="currentColor"/></svg>
+              </button>
+
+              <!-- Rotate 90 deg Button (Square Icon) -->
+              <button id="btnRotateStream" class="btn-icon-sq" title="Rotate Video 90° Clockwise">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              </button>
+
+              <!-- Stream Standby / Reconnect Button (Square Icon) -->
+              <button id="btnOpenStream" class="btn-icon-sq" title="Toggle Stream Standby">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+              </button>
+            </div>
           </div>
 
           <!-- Video Viewport Container -->
           <div class="video-viewport-wrapper">
+            <div id="videoFlashOverlay" class="video-flash-overlay"></div>
             <canvas id="videoCanvas" class="video-canvas"></canvas>
 
             <!-- Top Video HUD Badges -->
             <div class="video-hud-overlay">
-              <div class="hud-tag left-tag" id="hudPitchRollTag">PITCH: 0 | ROLL: 0</div>
+              <div class="hud-tag left-tag" id="hudPitchRollTag">PITCH: 0° | ROLL: 0°</div>
               <div class="hud-tag right-tag" id="hudThrTag">THR: 50%</div>
             </div>
 
-            <!-- Video Standby Overlay -->
-            <div id="standbyOverlay" class="video-standby-box">
+            <!-- Video Standby Overlay (Hidden by default so live / simulated HUD feed is visible) -->
+            <div id="standbyOverlay" class="video-standby-box hide">
               <div class="standby-cam-icon">
                 <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
               </div>
-              <div class="standby-title">FPV Video stream paused or disconnected</div>
-              <div class="standby-url" id="standbyStreamUrl">MJPEG / RTSP Stream: http://192.168.4.1:8080/?action=stream</div>
+              <div class="standby-title">FPV Video stream ready</div>
+              <div class="standby-url" id="standbyStreamUrl">Target AP Stream: http://192.168.4.1:8080/?action=stream / RTSP :7070</div>
             </div>
           </div>
         </div>
@@ -226,7 +311,7 @@
             
             <!-- LEFT JOYSTICK POD -->
             <div class="joystick-pod">
-              <span class="pod-label">LEFT: THROTTLE / YAW</span>
+              <span class="pod-label">LEFT: THROTTLE / YAW [W/S/A/D]</span>
               <div id="leftJoystickWrapper" class="aero-stick-base">
                 <div class="stick-ring outer-ring"></div>
                 <div class="stick-ring mid-ring"></div>
@@ -240,7 +325,7 @@
 
             <!-- RIGHT JOYSTICK POD -->
             <div class="joystick-pod">
-              <span class="pod-label">RIGHT: PITCH / ROLL</span>
+              <span class="pod-label">RIGHT: PITCH / ROLL [ARROWS]</span>
               <div id="rightJoystickWrapper" class="aero-stick-base">
                 <div class="stick-ring outer-ring"></div>
                 <div class="stick-ring mid-ring"></div>
@@ -286,8 +371,8 @@
 
     </main>
 
-    <!-- CONNECTION ARCHITECTURE SELECTION MODAL (POPUP ON OPEN) -->
-    <div id="connectionModal" class="v-modal-backdrop">
+    <!-- CONNECTION ARCHITECTURE SELECTION MODAL -->
+    <div id="connectionModal" class="v-modal-backdrop hide">
       <div class="v-modal-card v-connection-modal">
         <div class="v-modal-header">
           <div class="v-modal-title-group">
@@ -433,12 +518,17 @@
             <h3>6-DOF IMU Sensor Telemetry &amp; Flight Data Logger</h3>
           </div>
           <div class="v-imu-header-actions">
+            <span id="imuHardwarePill" class="v-tag v-tag-mono" title="Hardware Physical Sensor Telemetry Link">ESTIMATED IMU</span>
+            <button id="btnConnectSerialSensor" class="v-btn v-btn-secondary btn-xs" title="Connect external ESP32 / Arduino / MPU6050 via USB Serial COM">🔌 Connect USB Sensor</button>
             <span id="imuLogStatusPill" class="v-tag v-tag-rec">LOGGING ACTIVE</span>
+            <button id="btnZeroCoordsHeader" class="v-btn v-btn-ghost btn-xs">Reset (0,0,0) Home</button>
             <button id="btnCloseImu" class="v-close-btn">&times;</button>
           </div>
         </div>
 
         <div class="v-modal-body v-imu-body">
+          
+          <!-- Top Stats Strip -->
           <div class="v-imu-stats-strip">
             <div class="imu-stat-card primary">
               <span class="imu-stat-label">SORTIE FLIGHT TIME</span>
@@ -453,15 +543,26 @@
             <div class="imu-stat-card">
               <span class="imu-stat-label">TOTAL G-LOAD</span>
               <span id="imuTotalG" class="imu-stat-val highlight">1.000 g</span>
-              <span class="imu-stat-sub">DYNAMIC SPECIFIC FORCE</span>
+              <span class="imu-stat-sub">SPECIFIC FORCE</span>
             </div>
             <div class="imu-stat-card">
               <span class="imu-stat-label">SAMPLES LOGGED</span>
               <span id="imuSampleCount" class="imu-stat-val">0</span>
-              <span class="imu-stat-sub">10 HZ CONTINUOUS BUFFER</span>
+              <span class="imu-stat-sub">CHANGE-DRIVEN EVENT LOGS</span>
+            </div>
+            <div class="imu-stat-card">
+              <span class="imu-stat-label">DISTANCE HOME</span>
+              <span id="imuDistHomeTop" class="imu-stat-val text-cyan">0.00 m</span>
+              <span class="imu-stat-sub">ORIGIN (0,0,0)</span>
+            </div>
+            <div class="imu-stat-card">
+              <span class="imu-stat-label">GROUND SPEED</span>
+              <span id="imuSpeedTop" class="imu-stat-val text-emerald">0.00 m/s</span>
+              <span class="imu-stat-sub">HORIZONTAL VELOCITY</span>
             </div>
           </div>
 
+          <!-- Tabs Navigation Bar -->
           <div class="v-imu-tabs-bar">
             <button class="v-imu-tab-btn active" data-tab="tab-overview">
               <span class="tab-icon">📊</span> SENSORS &amp; 3D COORDS
@@ -477,8 +578,11 @@
             </button>
           </div>
 
+          <!-- TAB 1: SENSORS & 3D COORDS -->
           <div id="tab-overview" class="v-imu-tab-pane active">
             <div class="v-imu-grid">
+              
+              <!-- Card 1: 3D Local Coordinates -->
               <div class="imu-card imu-card-coords">
                 <div class="card-head">
                   <h4>3D Local Coordinates (Home: 0, 0, 0)</h4>
@@ -490,12 +594,12 @@
                 <div class="imu-metrics-row">
                   <div class="gauge-pill highlight-pill">
                     <span class="g-lbl">X (EAST)</span>
-                    <span id="imuPosX" class="g-val color-blue">0.00 m</span>
+                    <span id="imuPosX" class="g-val color-blue">+0.00 m</span>
                     <span class="g-sub" id="imuPosXCm">0.0 cm</span>
                   </div>
                   <div class="gauge-pill highlight-pill">
                     <span class="g-lbl">Y (NORTH)</span>
-                    <span id="imuPosY" class="g-val color-emerald">0.00 m</span>
+                    <span id="imuPosY" class="g-val color-emerald">+0.00 m</span>
                     <span class="g-sub" id="imuPosYCm">0.0 cm</span>
                   </div>
                   <div class="gauge-pill highlight-pill">
@@ -504,46 +608,269 @@
                     <span class="g-sub" id="imuPosZCm">0.0 cm</span>
                   </div>
                 </div>
+                <div class="imu-sub-metrics">
+                  <div><span>Distance to Home:</span> <b id="imuDistHomeSub" class="text-cyan">0.00 m</b></div>
+                  <div><span>Total Odometer:</span> <b id="imuTotalDistance">0.00 m</b></div>
+                </div>
+              </div>
+
+              <!-- Card 2: 6-Axis Inertial Measurement Unit (IMU) -->
+              <div class="imu-card">
+                <div class="card-head">
+                  <h4>6-Axis IMU (Gyroscope &amp; Accelerometer)</h4>
+                  <span class="card-tag">TRI-AXIAL IMU</span>
+                </div>
+                <div class="imu-2col-deck">
+                  <div class="deck-group">
+                    <span class="group-title">GYROSCOPE ANGULAR RATES (°/s)</span>
+                    <div class="deck-row"><span>Roll Rate (ωx):</span> <b id="imuGyroRoll" class="text-cyan">0.0 °/s</b></div>
+                    <div class="deck-row"><span>Pitch Rate (ωy):</span> <b id="imuGyroPitch" class="text-amber">0.0 °/s</b></div>
+                    <div class="deck-row"><span>Yaw Rate (ωz):</span> <b id="imuGyroYaw" class="text-emerald">0.0 °/s</b></div>
+                  </div>
+                  <div class="deck-group">
+                    <span class="group-title">ACCELEROMETER FORCES (g)</span>
+                    <div class="deck-row"><span>Accel X (Ax):</span> <b id="imuAccelX">0.000 g</b></div>
+                    <div class="deck-row"><span>Accel Y (Ay):</span> <b id="imuAccelY">0.000 g</b></div>
+                    <div class="deck-row"><span>Accel Z (Az):</span> <b id="imuAccelZ" class="text-emerald">1.000 g</b></div>
+                    <div class="deck-row"><span>Total G-Load:</span> <b id="imuTotalGCard" class="text-amber">1.000 g</b></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 3: Speed, Altitude & Barometer -->
+              <div class="imu-card">
+                <div class="card-head">
+                  <h4>Odometry, Speed &amp; Barometer Hold</h4>
+                  <span class="card-tag">KINEMATICS</span>
+                </div>
+                <div class="imu-2col-deck">
+                  <div class="deck-group">
+                    <span class="group-title">GROUND SPEED &amp; CLIMB</span>
+                    <div class="deck-row"><span>Ground Speed:</span> <b id="imuGroundSpeed" class="text-emerald">0.00 m/s</b></div>
+                    <div class="deck-row"><span>Speed (km/h):</span> <b id="imuGroundSpeedKmh">0.0 km/h</b></div>
+                    <div class="deck-row"><span>Climb Velocity (Vz):</span> <b id="imuClimbRate">+0.00 m/s</b></div>
+                  </div>
+                  <div class="deck-group">
+                    <span class="group-title">ESTIMATED ALTITUDE</span>
+                    <div class="deck-row"><span>Altitude (Meters):</span> <b id="imuAltMeters" class="text-cyan">0.00 m</b></div>
+                    <div class="deck-row"><span>Throttle Level:</span> <b id="imuAltPct">0%</b></div>
+                    <div class="deck-row"><span>Altitude Hold:</span> <b id="imuAltHold" class="text-emerald">LOCK ON</b></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 4: Hardware Channels & Modes -->
+              <div class="imu-card">
+                <div class="card-head">
+                  <h4>8-Bit Hardware Channels &amp; Protocol</h4>
+                  <span class="card-tag">LINK STATS</span>
+                </div>
+                <div class="imu-2col-deck">
+                  <div class="deck-group">
+                    <span class="group-title">RAW 8-BIT CHANNELS</span>
+                    <div class="deck-row"><span>Roll Channel:</span> <b id="imuRawRoll">128</b></div>
+                    <div class="deck-row"><span>Pitch Channel:</span> <b id="imuRawPitch">128</b></div>
+                    <div class="deck-row"><span>Throttle Channel:</span> <b id="imuRawThr">128</b></div>
+                    <div class="deck-row"><span>Yaw Channel:</span> <b id="imuRawYaw">128</b></div>
+                  </div>
+                  <div class="deck-group">
+                    <span class="group-title">SPEED GEAR &amp; PROTOCOL</span>
+                    <div class="deck-row"><span>Speed Gear:</span> <b id="imuGear" class="text-cyan">60%</b></div>
+                    <div class="deck-row"><span>Protocol Link:</span> <b>GL-21B / E88 UDP</b></div>
+                    <div class="deck-row"><span>Link Frequency:</span> <b class="text-emerald">25 Hz Heartbeat</b></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- TAB 2: FLIGHT DATA LOGS (EXCEL / CSV) -->
+          <div id="tab-logs" class="v-imu-tab-pane">
+            <div class="logs-tab-toolbar">
+              <div class="toolbar-left">
+                <button id="btnExportCsv" class="v-btn v-btn-primary btn-sm" title="Download Current Flight Simulation (.csv) Isolated">
+                  📥 Download Current Flight (.csv)
+                </button>
+                <button id="btnExportAllCsv" class="v-btn v-btn-secondary btn-sm" title="Download All Flight Simulations in Session (.csv)">
+                  📥 Download All Flights (.csv)
+                </button>
+                <button id="btnExportJson" class="v-btn v-btn-secondary btn-sm" title="Download JSON Flight Dataset">
+                  📥 JSON
+                </button>
+                <button id="btnExportServerCsv" class="v-btn v-btn-ghost btn-sm" title="Download Server-Side Log Buffer">
+                  🌐 Server CSV
+                </button>
+                <button id="btnToggleLogging" class="v-btn v-btn-secondary btn-sm">Pause Recording</button>
+                <button id="btnClearImuLogs" class="v-btn v-btn-ghost btn-sm text-red">Clear Buffer</button>
+              </div>
+              <div class="toolbar-right">
+                <span id="imuSortieBadge" class="v-tag v-tag-rec" title="Active Flight Sortie">Sortie #1</span>
+                <input type="text" id="imuLogSearch" class="v-input input-sm" placeholder="Filter logs (e.g. time, coord)...">
+                <span id="imuTableCountBadge" class="v-tag v-tag-mono">0 Logged</span>
+              </div>
+            </div>
+
+            <!-- Scrollable Table -->
+            <div class="logs-table-container">
+              <table class="imu-logs-table">
+                <thead>
+                  <tr>
+                    <th>Time (Local)</th>
+                    <th>Sortie Time</th>
+                    <th>Flight Event</th>
+                    <th>X (East)</th>
+                    <th>Y (North)</th>
+                    <th>Z (Alt)</th>
+                    <th>Dist Home</th>
+                    <th>Roll / Pitch / Yaw</th>
+                    <th>Gyro ω (r/p)</th>
+                    <th>Accel (x/y/z)</th>
+                    <th>Total G</th>
+                    <th>Raw (R,P,T,Y)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="imuLogsTableBody">
+                  <tr><td colspan="13" class="table-empty-row">No flight logs recorded in buffer yet. Fly drone or move sticks to record telemetry.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB 3: 2D TRAJECTORY RADAR -->
+          <div id="tab-radar" class="v-imu-tab-pane">
+            <div class="radar-tab-wrapper">
+              <div class="radar-canvas-box">
+                <canvas id="imuRadarCanvas" width="580" height="340"></canvas>
+              </div>
+              <div class="radar-legend-card">
+                <h4>2D Flight Path Radar</h4>
+                <p>Top-down flight trajectory tracking relative to Home (0,0,0) Origin.</p>
+                <div class="radar-legend-items">
+                  <div><span class="legend-dot dot-amber"></span> <b>(0,0,0) Home Origin</b></div>
+                  <div><span class="legend-dot dot-blue"></span> <b>Breadcrumb Flight Trail</b></div>
+                  <div><span class="legend-dot dot-cyan"></span> <b>Quadcopter Heading</b></div>
+                </div>
               </div>
             </div>
           </div>
+
+          <!-- TAB 4: OSCILLOSCOPE WAVEFORMS -->
+          <div id="tab-waveforms" class="v-imu-tab-pane">
+            <div class="waveform-tab-wrapper">
+              <div class="waveform-toolbar">
+                <span class="wave-label">Channels:</span>
+                <button class="wave-toggle-btn active" data-channel="roll"><span class="wave-dot dot-blue"></span> Roll (°)</button>
+                <button class="wave-toggle-btn active" data-channel="pitch"><span class="wave-dot dot-amber"></span> Pitch (°)</button>
+                <button class="wave-toggle-btn active" data-channel="accelZ"><span class="wave-dot dot-green"></span> Accel Z (g)</button>
+                <button class="wave-toggle-btn active" data-channel="gyroRoll"><span class="wave-dot dot-purple"></span> Gyro Roll (°/s)</button>
+              </div>
+              <div class="waveform-canvas-box">
+                <canvas id="imuWaveformCanvas" width="780" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
 
-    <!-- AUTONOMOUS MISSION MODAL -->
+    <!-- AUTONOMOUS MISSION & CUSTOM PROGRAMMED INSTRUCTION ENGINE MODAL -->
     <div id="mission-modal" class="v-modal-backdrop hide">
       <div class="v-modal-card v-mission-modal">
         <div class="v-modal-header">
           <div class="v-modal-title-group">
             <div class="v-badge-guide">MISSION ENGINE</div>
-            <h3>Autonomous Flight Mission Runner</h3>
+            <h3>Autonomous Flight &amp; Custom Programmed Instructions</h3>
           </div>
-          <button id="btnCloseMission" class="v-close-btn">&times;</button>
+          <div class="v-imu-header-actions">
+            <span id="mission-status-pill" class="v-tag v-tag-mono">READY</span>
+            <button id="btnCloseMission" class="v-close-btn">&times;</button>
+          </div>
         </div>
-        <div class="v-modal-body">
+        <div class="v-modal-body v-mission-body">
           <div class="mission-two-col">
+            
+            <!-- LEFT COLUMN: SCRIPT EDITOR & QUICK CHIPS -->
             <div class="mission-editor-col">
-              <textarea id="mission-script-input" class="mission-code-editor" placeholder="# Sequence:
+              
+              <!-- Preset Selector -->
+              <div class="mission-preset-bar">
+                <label class="v-label">Preset Mission:</label>
+                <select id="mission-preset-select" class="v-input select-preset">
+                  <option value="takeoff_50cm_land">Preset 1: Auto Takeoff &rarr; Hover &rarr; Land</option>
+                  <option value="takeoff_1m_flip_land">Preset 2: Takeoff to 1m &rarr; 360° Flip &rarr; Land</option>
+                  <option value="square_patrol">Preset 3: 1m x 1m Square Box Patrol</option>
+                  <option value="panoramic_scan">Preset 4: Ascend 1.5m &rarr; 360° Scan &rarr; Land</option>
+                </select>
+              </div>
+
+              <!-- Quick Command Chips -->
+              <div class="mission-chips-strip">
+                <span class="chips-label">Quick Commands:</span>
+                <div class="chips-list">
+                  <button class="cmd-chip" data-cmd="TAKEOFF">+ TAKEOFF</button>
+                  <button class="cmd-chip" data-cmd="LAND">+ LAND</button>
+                  <button class="cmd-chip" data-cmd="HOVER 2.0">+ HOVER 2s</button>
+                  <button class="cmd-chip" data-cmd="UP 50">+ UP 50cm</button>
+                  <button class="cmd-chip" data-cmd="DOWN 50">+ DOWN 50cm</button>
+                  <button class="cmd-chip" data-cmd="FORWARD 50">+ FWD 50cm</button>
+                  <button class="cmd-chip" data-cmd="BACKWARD 50">+ BWD 50cm</button>
+                  <button class="cmd-chip" data-cmd="LEFT 50">+ LEFT 50cm</button>
+                  <button class="cmd-chip" data-cmd="RIGHT 50">+ RIGHT 50cm</button>
+                  <button class="cmd-chip" data-cmd="YAW 90">+ YAW 90°</button>
+                  <button class="cmd-chip" data-cmd="YAW 180">+ YAW 180°</button>
+                  <button class="cmd-chip" data-cmd="FLIP FORWARD">+ FLIP 360°</button>
+                  <button class="cmd-chip" data-cmd="CALIBRATE">+ CALIBRATE</button>
+                </div>
+              </div>
+
+              <!-- Code Editor Textarea -->
+              <div class="editor-wrapper">
+                <textarea id="mission-script-editor" class="mission-code-editor" spellcheck="false" placeholder="# Custom Flight Instructions:
 TAKEOFF
-HOVER 2
-UP 50
-HOVER 2
+HOVER 2.0
+FORWARD 50
+HOVER 1.5
+YAW 180
 LAND"></textarea>
+              </div>
+
+              <!-- Control Buttons -->
               <div class="mission-controls-strip">
-                <button id="btn-run-mission" class="v-btn v-btn-primary">Execute Mission Script</button>
-                <button id="btn-pause-mission" class="v-btn v-btn-secondary">Pause</button>
-                <button id="btn-abort-mission" class="v-btn v-btn-danger">ABORT &amp; LAND</button>
+                <button id="btn-run-mission" class="v-btn v-btn-primary">▶ Execute Mission Script</button>
+                <button id="btn-pause-mission" class="v-btn v-btn-secondary">⏸ Pause</button>
+                <button id="btn-abort-mission" class="v-btn v-btn-danger">🛑 ABORT &amp; LAND</button>
+                <button id="btn-save-mission" class="v-btn v-btn-secondary btn-sm">💾 Save</button>
+                <button id="btn-download-script" class="v-btn v-btn-ghost btn-sm">📥 Export .txt</button>
+                <button id="btn-upload-script" class="v-btn v-btn-ghost btn-sm">📁 Open .txt</button>
+                <input type="file" id="mission-file-input" accept=".txt" class="hide">
               </div>
             </div>
-            <div class="mission-radar-col">
-              <div class="mission-radar-box">
-                <canvas id="mission-radar-canvas" width="400" height="220"></canvas>
+
+            <!-- RIGHT COLUMN: VISUAL STEP PIPELINE & CONSOLE -->
+            <div class="mission-steps-col">
+              <div class="step-pipeline-card">
+                <div class="card-head">
+                  <h4>Instruction Execution Sequence</h4>
+                  <span class="card-tag highlight">REAL-TIME PIPELINE</span>
+                </div>
+                <div id="mission-steps-progress" class="mission-steps-list">
+                  <div class="mission-empty">Loading instruction sequence...</div>
+                </div>
               </div>
-              <div id="mission-log" class="mission-log-box">
-                <div class="mission-log-line log-info">[System] Autonomous Mission Engine initialized.</div>
+
+              <div class="mission-console-card">
+                <div class="card-head">
+                  <h4>Mission Execution Console</h4>
+                </div>
+                <div id="mission-log" class="mission-log-box">
+                  <div class="mission-log-line log-info">[System] Autonomous Mission Engine initialized.</div>
+                </div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -564,7 +891,8 @@ LAND"></textarea>
             <div class="guide-cmd-card"><b>[T]</b> Takeoff &bull; <b>[L]</b> Land &bull; <b>[SPACE / ESC]</b> Emergency Stop</div>
             <div class="guide-cmd-card"><b>[W/S]</b> Throttle Up / Down &bull; <b>[A/D]</b> Yaw Left / Right</div>
             <div class="guide-cmd-card"><b>[Arrow Up/Down]</b> Pitch Forward / Back &bull; <b>[Arrow Left/Right]</b> Roll Left / Right</div>
-            <div class="guide-cmd-card"><b>[C]</b> Calibrate Gyro &bull; <b>[H]</b> Handshake Wakeup &bull; <b>[F]</b> 360 Flip</div>
+            <div class="guide-cmd-card"><b>[I]</b> IMU Sensor Studio &bull; <b>[M]</b> Mission Runner &bull; <b>[E]</b> Export Excel Logs</div>
+            <div class="guide-cmd-card"><b>[C]</b> Calibrate Gyro &bull; <b>[H]</b> Handshake Wakeup &bull; <b>[G]</b> Open Guide</div>
           </div>
         </div>
       </div>
@@ -572,10 +900,10 @@ LAND"></textarea>
 
   </div>
 
-  <script src="js/hud.js"></script>
-  <script src="js/joystick.js"></script>
-  <script src="js/imu_logger.js"></script>
-  <script src="js/mission_runner.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/hud.js?v=2.2"></script>
+  <script src="js/joystick.js?v=2.2"></script>
+  <script src="js/imu_logger.js?v=2.2"></script>
+  <script src="js/mission_runner.js?v=2.2"></script>
+  <script src="js/app.js?v=2.2"></script>
 </body>
 </html>

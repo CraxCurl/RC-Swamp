@@ -40,6 +40,7 @@ const droneState = {
   yaw: 128,
 
   // Action Flags
+  isAirborne: false,
   isFastFly: false,
   isFastDrop: false,
   isEmergencyStop: false,
@@ -148,8 +149,8 @@ function broadcastVideoFrame(buffer, source = 'PyAV-RTSP') {
 
   if (videoClients.size === 0) return;
   for (const client of videoClients) {
-    // Zero-lag queueing: Send if client socket buffer is under 128 KB backpressure limit
-    if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 128 * 1024) {
+    // Zero-lag queueing: Send if client socket buffer is under 256 KB backpressure limit
+    if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 256 * 1024) {
       client.send(buffer, { binary: true });
     }
   }
@@ -224,7 +225,7 @@ function startPyAvRtspRelay() {
 
   pyAvProcess.on('exit', (code) => {
     clearTimeout(pyAvRestartTimer);
-    pyAvRestartTimer = setTimeout(startPyAvRtspRelay, 1500);
+    pyAvRestartTimer = setTimeout(startPyAvRtspRelay, 800);
   });
 }
 
@@ -409,17 +410,20 @@ wssTelemetry.on('connection', (ws) => {
         droneState.throttle = typeof msg.throttle === 'number' ? msg.throttle : droneState.throttle;
         droneState.yaw = typeof msg.yaw === 'number' ? msg.yaw : droneState.yaw;
       } else if (msg.action === 'takeoff') {
+        droneState.isAirborne = true;
         droneState.isFastFly = true;
         droneState.isFastDrop = false;
         droneState.isEmergencyStop = false;
         sendFlightPacketBurst(3);
         setTimeout(() => { droneState.isFastFly = false; }, 1500);
       } else if (msg.action === 'land') {
+        droneState.isAirborne = false;
         droneState.isFastDrop = true;
         droneState.isFastFly = false;
         sendFlightPacketBurst(3);
         setTimeout(() => { droneState.isFastDrop = false; }, 1500);
       } else if (msg.action === 'emergency_stop') {
+        droneState.isAirborne = false;
         droneState.isEmergencyStop = true;
         droneState.isFastFly = false;
         droneState.isFastDrop = false;
@@ -446,11 +450,16 @@ wssTelemetry.on('connection', (ws) => {
       } else if (msg.action === 'set_gear') {
         droneState.gear = msg.gear;
       } else if (msg.action === 'switch_camera') {
-        droneState.cameraId = msg.camera_id;
+        const targetCam = parseInt(msg.camera_id, 10) || 1;
+        droneState.cameraId = targetCam;
         droneState.lockedVideoSource = null;
         droneState.lastSourceFrameTime = 0;
-        sendDroneUdp(Buffer.from([0x06, msg.camera_id]));
-        sendDroneUdp(Buffer.from([0x06, msg.camera_id]));
+        const camPkt = Buffer.from([0x06, targetCam]);
+        sendDroneUdp(camPkt);
+        sendDroneUdp(camPkt);
+        sendDroneUdp(camPkt);
+        console.log(`[Camera Switch] Sent UDP 0x06 ${targetCam} burst to drone. Re-syncing RTSP stream...`);
+        startPyAvRtspRelay();
       } else if (msg.action === 'set_trims') {
         droneState.rollTrim = msg.roll_trim;
         droneState.pitchTrim = msg.pitch_trim;
@@ -559,6 +568,20 @@ server.on('upgrade', (request, socket, head) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/camera_data', express.static(FRAMES_DIR));
 
+// Hardware Physical Sensor Ingestion API (ESP32 / Arduino / Python sensor scripts)
+app.post('/api/telemetry/sensor', (req, res) => {
+  const sensorData = req.body;
+  if (sensorData) {
+    for (const client of telemetryClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'telemetry', hardware_imu: sensorData }));
+      }
+    }
+    return res.json({ success: true, received: sensorData });
+  }
+  return res.status(400).json({ error: 'Missing sensorData in request body' });
+});
+
 // 0. REST Control API (for Autonomous Python Mission Scripts & Web clients)
 app.post('/api/control', (req, res) => {
   const { roll, pitch, throttle, yaw, take_off, land, emergency, flags, action, direction, camera_id } = req.body;
@@ -577,19 +600,41 @@ app.post('/api/control', (req, res) => {
     droneState.cameraId = camId;
     droneState.lockedVideoSource = null;
     droneState.lastSourceFrameTime = 0;
-    sendDroneUdp(Buffer.from([0x06, camId]));
-    sendDroneUdp(Buffer.from([0x06, camId]));
+    
+    // Broadcast switch packet 3x for reliable UDP delivery
+    const switchPacket = Buffer.from([0x06, camId]);
+    sendDroneUdp(switchPacket);
+    setTimeout(() => sendDroneUdp(switchPacket), 40);
+    setTimeout(() => sendDroneUdp(switchPacket), 100);
+
+    // Also send on port 8090 for legacy E88 firmware
+    try {
+      udpClient.send(switchPacket, 0, switchPacket.length, 8090, droneState.droneIp, () => {});
+    } catch (e) {}
+
+    console.log(`[*] Switched Camera Lens to: Camera #${camId} (${camId === 2 ? 'BOTTOM' : 'FRONT'}). Restarting RTSP stream...`);
+
+    // Restart PyAV RTSP relay so it reconnects to the newly switched sensor resolution/feed
+    clearTimeout(pyAvRestartTimer);
+    if (pyAvProcess) {
+      try { pyAvProcess.kill(); } catch (e) {}
+      pyAvProcess = null;
+    }
+    setTimeout(startPyAvRtspRelay, 400);
   }
 
   if (take_off) {
+    droneState.isAirborne = true;
     droneState.isFastFly = true;
     setTimeout(() => { droneState.isFastFly = false; }, 400);
   }
   if (land) {
+    droneState.isAirborne = false;
     droneState.isFastDrop = true;
     setTimeout(() => { droneState.isFastDrop = false; }, 400);
   }
   if (emergency) {
+    droneState.isAirborne = false;
     droneState.isEmergencyStop = true;
     setTimeout(() => { droneState.isEmergencyStop = false; }, 400);
   }
@@ -646,6 +691,31 @@ app.get('/api/camera-frame', (req, res) => {
   } else {
     res.status(503).json({ error: 'No camera frame received yet from drone. Connect to drone Wi-Fi.' });
   }
+});
+
+// 2b. Continuous HTTP MJPEG Multipart Stream Endpoint
+app.get('/api/camera-frame/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'multipart/x-mixed-replace; boundary=--myboundary',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Connection': 'close',
+    'Pragma': 'no-cache'
+  });
+
+  const sendFrame = () => {
+    if (res.writableEnded || res.destroyed) return;
+    if (droneState.latestFrameBytes) {
+      try {
+        res.write(`--myboundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${droneState.latestFrameBytes.length}\r\n\r\n`);
+        res.write(droneState.latestFrameBytes);
+        res.write('\r\n');
+      } catch (e) {}
+    }
+  };
+
+  const interval = setInterval(sendFrame, 40); // 25 FPS MJPEG HTTP stream
+  req.on('close', () => clearInterval(interval));
+  req.on('error', () => clearInterval(interval));
 });
 
 // 3. JSON Image Endpoint with Base64 + Synchronized Flight Telemetry
@@ -734,6 +804,7 @@ let lastTimerTick = Date.now();
 let serverPosX = 0.0;
 let serverPosY = 0.0;
 let serverPosZ = 0.0;
+let serverYawHeading = 0.0;
 let serverTotalDistance = 0.0;
 
 // 10 Hz Server-side IMU Telemetry & Coordinates Sampler
@@ -742,41 +813,55 @@ setInterval(() => {
   const dt = (now - lastTimerTick) / 1000;
   lastTimerTick = now;
 
-  const isAirborne = droneState.throttle > 20 || droneState.isFastFly;
+  const isAirborne = droneState.isAirborne || droneState.isFastFly;
   if (isAirborne) {
     currentSortieTimeSeconds += dt;
     sessionFlightTimeSeconds += dt;
-  } else if (droneState.throttle <= 5 && !droneState.isFastFly) {
+  } else {
     currentSortieTimeSeconds = 0;
   }
 
-  // Calculate IMU derivatives
-  const rollDeg = (droneState.roll - 128) * 0.35;
-  const pitchDeg = -(droneState.pitch - 128) * 0.25;
-  const yawDeg = ((droneState.yaw - 128) * 1.4 + 360) % 360;
+  // Calculate IMU derivatives based on calibrated physics
+  const rollDeg = (droneState.roll - 128) * (28.5 / 127.0);
+  const pitchDeg = (droneState.pitch - 128) * (28.5 / 127.0);
+  
+  // Continuous yaw heading integration (deg/s rate)
+  const yawRate = (droneState.yaw - 128) / 127.0 * 130.0; // max 130 deg/s
+  if (isAirborne || Math.abs(yawRate) > 3.0) {
+    serverYawHeading = (serverYawHeading + yawRate * dt + 360) % 360;
+  }
 
   const rollRad = (rollDeg * Math.PI) / 180;
   const pitchRad = (pitchDeg * Math.PI) / 180;
-  const yawRad = (yawDeg * Math.PI) / 180;
-  const thrustLoad = (droneState.throttle / 128.0) * 0.85;
+  const yawRad = (serverYawHeading * Math.PI) / 180;
+  
+  const thrOffsetG = (droneState.throttle - 128) / 127.0;
+  const verticalThrustG = isAirborne ? Math.max(0.5, 1.0 + thrOffsetG * 0.35) : 1.0;
 
   const accelX = Math.sin(pitchRad);
   const accelY = -Math.sin(rollRad) * Math.cos(pitchRad);
-  const accelZ = Math.cos(rollRad) * Math.cos(pitchRad) * (isAirborne ? (0.4 + thrustLoad * 0.6) : 1.0);
+  const accelZ = Math.cos(rollRad) * Math.cos(pitchRad) * verticalThrustG;
   const totalG = Math.sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
 
   // 3D Coordinates Dead-Reckoning (Origin 0,0,0)
-  const maxLinearSpeed = droneState.gear === 1 ? 0.35 : droneState.gear === 3 ? 1.10 : 0.65;
+  const maxLinearSpeed = droneState.gear === 1 ? 0.35 : droneState.gear === 3 ? 0.85 : 0.65;
   let velX = 0, velY = 0, velZ = 0;
   if (isAirborne) {
-    const bodyForwardVel = (pitchDeg / 30.0) * maxLinearSpeed;
-    const bodyStrafeVel = (rollDeg / 40.0) * maxLinearSpeed;
+    const bodyForwardVel = (pitchDeg / 28.5) * maxLinearSpeed;
+    const bodyStrafeVel = (rollDeg / 28.5) * maxLinearSpeed;
     velX = (bodyStrafeVel * Math.cos(yawRad)) + (bodyForwardVel * Math.sin(yawRad));
     velY = (-bodyStrafeVel * Math.sin(yawRad)) + (bodyForwardVel * Math.cos(yawRad));
     
     serverPosX += velX * dt;
     serverPosY += velY * dt;
-    serverPosZ = Math.max(0, (droneState.throttle / 255) * 3.5);
+    
+    // Altitude-hold climb / descent dynamics
+    if (currentSortieTimeSeconds < 2.5 && serverPosZ < 0.85) {
+      serverPosZ = Math.min(1.2, serverPosZ + 0.45 * dt);
+    } else {
+      const vz = thrOffsetG * 0.65;
+      serverPosZ = Math.max(0.05, serverPosZ + vz * dt);
+    }
     serverTotalDistance += Math.sqrt(velX * velX + velY * velY) * dt;
   } else {
     serverPosZ = 0;
@@ -796,12 +881,12 @@ setInterval(() => {
     total_distance_traveled_m: parseFloat(serverTotalDistance.toFixed(2)),
     roll_deg: parseFloat(rollDeg.toFixed(2)),
     pitch_deg: parseFloat(pitchDeg.toFixed(2)),
-    yaw_heading_deg: parseFloat(yawDeg.toFixed(1)),
+    yaw_heading_deg: parseFloat(serverYawHeading.toFixed(1)),
     accel_x_g: parseFloat(accelX.toFixed(3)),
     accel_y_g: parseFloat(accelY.toFixed(3)),
     accel_z_g: parseFloat(accelZ.toFixed(3)),
-    total_g_load: parseFloat(totalG.toFixed(3)),
-    estimated_altitude_pct: Math.round((droneState.throttle / 255) * 100),
+    total_g_load: parseFloat(totalG.toFixed(2)),
+    estimated_altitude_pct: Math.min(100, Math.max(0, Math.round((serverPosZ / 3.0) * 100))),
     estimated_altitude_m: parseFloat(serverPosZ.toFixed(2)),
     raw_roll_channel_1_255: droneState.roll,
     raw_pitch_channel_1_255: droneState.pitch,
@@ -821,9 +906,46 @@ setInterval(() => {
     packets_received: droneState.packetsReceived
   };
 
-  serverImuLogs.push(sample);
-  if (serverImuLogs.length > 10000) {
-    serverImuLogs.shift();
+  // Change-Detection Logging (Only record on changes or periodic 3s flight heartbeat)
+  const prev = serverImuLogs.length > 0 ? serverImuLogs[serverImuLogs.length - 1] : null;
+  let shouldLog = false;
+  let eventName = 'DATA';
+
+  if (!prev) {
+    shouldLog = true;
+    eventName = 'INITIALIZE';
+  } else if (isAirborne !== (prev.is_airborne_state || false)) {
+    shouldLog = true;
+    eventName = isAirborne ? 'TAKEOFF' : 'LANDED';
+  } else if (Math.abs(sample.raw_roll_channel_1_255 - prev.raw_roll_channel_1_255) >= 3 ||
+             Math.abs(sample.raw_pitch_channel_1_255 - prev.raw_pitch_channel_1_255) >= 3 ||
+             Math.abs(sample.raw_throttle_channel_0_255 - prev.raw_throttle_channel_0_255) >= 3 ||
+             Math.abs(sample.raw_yaw_channel_1_255 - prev.raw_yaw_channel_1_255) >= 3) {
+    shouldLog = true;
+    eventName = 'STICK_INPUT';
+  } else if (Math.abs(sample.roll_deg - prev.roll_deg) >= 0.8 ||
+             Math.abs(sample.pitch_deg - prev.pitch_deg) >= 0.8 ||
+             Math.abs(sample.yaw_heading_deg - prev.yaw_heading_deg) >= 1.5) {
+    shouldLog = true;
+    eventName = 'ATTITUDE_CHANGE';
+  } else if (Math.abs(sample.pos_x_east_m - prev.pos_x_east_m) >= 0.05 ||
+             Math.abs(sample.pos_y_north_m - prev.pos_y_north_m) >= 0.05 ||
+             Math.abs(sample.pos_z_alt_m - prev.pos_z_alt_m) >= 0.05) {
+    shouldLog = true;
+    eventName = 'POSITION_UPDATE';
+  } else if (now - (prev.timestamp_epoch_ms || 0) >= (isAirborne ? 3000 : 8000)) {
+    shouldLog = true;
+    eventName = isAirborne ? 'FLIGHT_HEARTBEAT' : 'IDLE_HEARTBEAT';
+  }
+
+  if (shouldLog) {
+    sample.flight_event = eventName;
+    sample.is_airborne_state = isAirborne;
+    sample.local_time = new Date(now).toLocaleTimeString('en-US', { hour12: false }) + '.' + String(now % 1000).padStart(3, '0');
+    serverImuLogs.push(sample);
+    if (serverImuLogs.length > 5000) {
+      serverImuLogs.shift();
+    }
   }
 }, 100);
 
