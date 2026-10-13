@@ -1371,10 +1371,63 @@ html, body {
   font-weight: 600;
 }
 
+.cockpit-sensor-notice {
+  font-size: 8px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  text-align: center;
+  padding: 3px 6px;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+}
+
+.cockpit-sensor-notice b {
+  color: var(--text-secondary);
+}
+
 .cockpit-imu-foot {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+/* ==================== SENSOR NOTICE CARD ==================== */
+.sensor-notice-card {
+  background: rgba(0, 112, 243, 0.06);
+  border: 1px solid rgba(0, 112, 243, 0.25);
+  border-radius: var(--radius-xs);
+  padding: 8px 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.sensor-notice-card .notice-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.sensor-notice-card .notice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10.5px;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.sensor-notice-card .notice-item b {
+  color: #60a5fa;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.sensor-notice-card .notice-item u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ==================== IMU MODAL & TABS ==================== */
@@ -1574,6 +1627,7 @@ html, body {
 }
 
 .color-blue { color: #60a5fa !important; }
+.color-cyan { color: #00e5ff !important; }
 .color-emerald { color: var(--vercel-emerald) !important; }
 .color-amber { color: var(--vercel-amber) !important; }
 

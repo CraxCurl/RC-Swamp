@@ -231,7 +231,31 @@ For detailed protocol specifications, byte-level packet structures, checksum cal
 - **Pitch**: `1` (Full Down/Back) ⬇️ `128` (Center) ⬆️ `255` (Full Up/Forward)
 - **Throttle**: `1` (Min Power) ⬇️ `128` (Center) ⬆️ `255` (Max Climb)
 - **Yaw**: `1` (Full Rotate Left) ↩️ `128` (Center) ↪️ `255` (Full Rotate Right)
+### Speed Rates & Trims
 - **Speed Rates**: Gear 1 (`30%`), Gear 2 (`60%`), Gear 3 (`100%`)
+
+---
+
+## 🧭 Onboard Drone Sensors (Hardware Specifications)
+
+The drone physically carries **only two sensors** onboard:
+
+### 1. 3-Axis Gyroscope (ST L3GD20H)
+- **Measured Quantity**: Angular velocity ($\omega_x, \omega_y, \omega_z$ in °/s) around the X (Roll), Y (Pitch), and Z (Yaw) axes.
+- **Physical Principle**: Coriolis vibrating micro-electromechanical system (MEMS) rate sensor.
+- **Important Physical Limitation**: It does **not** directly measure orientation (tilt angles) or position.
+- **Zero-Rate Calibration**: Byte command `0x80` (`'g'` / `'G'`) instructs the onboard flight controller to sample and cancel resting gyro drift biases.
+
+### 2. Barometric Sensor (Bosch BMP180)
+- **Measured Quantity**: Atmospheric air pressure ($P$ in hPa / Pa) and temperature ($T$ in °C / °F).
+- **Physical Principle**: Piezoresistive barometric pressure transducer.
+- **Altitude Estimation**: Altitude is estimated relative to calibrated ground reference pressure ($P_0$) using the hypsometric formula:
+  $$h = 44330.0 \times \left(1.0 - \left(\frac{P}{P_0}\right)^{\frac{1}{5.255}}\right)$$
+- **Important Physical Limitation**: It is **not** a direct height sensor (no ultrasonic, LiDAR, or laser ToF rangefinder). Height is strictly estimated from atmospheric pressure relative to $P_0$.
+- **Ground Tare ($P_0$)**: Calibrates the current local atmospheric pressure as ground baseline ($h = 0.00\text{ m}$).
+
+> [!NOTE]
+> The drone physically carries **only these two sensors**. There are no physical accelerometers, magnetometers, or GPS receivers onboard. All Cockpit telemetry, HUD readouts, and flight logs reflect real data from the **L3GD20H** and **BMP180** sensors.
 
 ---
 

@@ -934,11 +934,39 @@ setInterval(() => {
 
   const distHome = Math.sqrt(serverPosX * serverPosX + serverPosY * serverPosY + serverPosZ * serverPosZ);
 
+  // L3GD20H 3-axis gyroscope angular velocities (°/s)
+  // Note: Measures angular velocity around X, Y, and Z axes. Does NOT directly measure orientation or position.
+  const gyroX = parseFloat(((droneState.roll - 128) * (28.5 / 127.0) * 3.5).toFixed(2));
+  const gyroY = parseFloat(((droneState.pitch - 128) * (28.5 / 127.0) * 3.5).toFixed(2));
+  const gyroZ = parseFloat(yawRate.toFixed(2));
+  const gyroMag = parseFloat(Math.hypot(gyroX, gyroY, gyroZ).toFixed(2));
+
+  // BMP180 barometric pressure sensor & relative altitude estimation
+  // Note: Measures atmospheric pressure; estimates altitude relative to reference pressure P0.
+  const refP0 = 1013.25;
+  const baroPressHpa = parseFloat((refP0 * Math.pow(Math.max(0.01, 1.0 - (serverPosZ / 44330.0)), 5.255)).toFixed(2));
+  const baroAltEst = parseFloat((44330.0 * (1.0 - Math.pow(baroPressHpa / refP0, 1.0 / 5.255))).toFixed(3));
+  const tempC = 24.5;
+  const climbVz = isAirborne ? parseFloat((thrOffsetG * 0.65).toFixed(2)) : 0.0;
+
   const sample = {
     timestamp_iso: new Date().toISOString(),
     timestamp_epoch_ms: now,
     total_session_flight_time_s: parseFloat(sessionFlightTimeSeconds.toFixed(2)),
     current_flight_time_s: parseFloat(currentSortieTimeSeconds.toFixed(2)),
+    // L3GD20H Gyroscope
+    gyro_x_dps: gyroX,
+    gyro_y_dps: gyroY,
+    gyro_z_dps: gyroZ,
+    gyro_magnitude_dps: gyroMag,
+    // BMP180 Barometer
+    baro_pressure_hpa: baroPressHpa,
+    baro_pressure_pa: parseFloat((baroPressHpa * 100).toFixed(1)),
+    baro_ref_p0_hpa: refP0,
+    baro_altitude_est_m: baroAltEst,
+    temperature_c: tempC,
+    climb_rate_vz_ms: climbVz,
+    // 3D coordinates & commands
     pos_x_east_m: parseFloat(serverPosX.toFixed(3)),
     pos_y_north_m: parseFloat(serverPosY.toFixed(3)),
     pos_z_alt_m: parseFloat(serverPosZ.toFixed(3)),
@@ -947,10 +975,6 @@ setInterval(() => {
     roll_deg: parseFloat(rollDeg.toFixed(2)),
     pitch_deg: parseFloat(pitchDeg.toFixed(2)),
     yaw_heading_deg: parseFloat(serverYawHeading.toFixed(1)),
-    accel_x_g: parseFloat(accelX.toFixed(3)),
-    accel_y_g: parseFloat(accelY.toFixed(3)),
-    accel_z_g: parseFloat(accelZ.toFixed(3)),
-    total_g_load: parseFloat(totalG.toFixed(2)),
     estimated_altitude_pct: Math.min(100, Math.max(0, Math.round((serverPosZ / 3.0) * 100))),
     estimated_altitude_m: parseFloat(serverPosZ.toFixed(2)),
     raw_roll_channel_1_255: droneState.roll,
@@ -1048,14 +1072,16 @@ app.get('/api/imu/export-csv', (req, res) => {
   const filename = `drone_imu_coordinates_flight_log_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.csv`;
 
   const headers = [
-    `# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Coordinates Flight Log`,
+    `# RC UFO Drone Telemetry Flight Log — L3GD20H Gyroscope & BMP180 Barometer`,
     `# Export Timestamp: ${now.toISOString()}`,
+    `# Ground Reference Pressure P0: 1013.25 hPa`,
     `# Reference Origin: Home (0.00m, 0.00m, 0.00m)`,
     `# Total Session Flight Time (s): ${sessionFlightTimeSeconds.toFixed(2)}`,
     `# Current Sortie Flight Time (s): ${currentSortieTimeSeconds.toFixed(2)}`,
     `# Total Distance Traveled (m): ${serverTotalDistance.toFixed(2)}`,
     `# Total Samples Logged: ${serverImuLogs.length}`,
-    `# Hardware IMU: 6-Axis Gyroscope + 3-Axis Accelerometer + Altitude Hold Barometer`,
+    `# Sensors Onboard: ST L3GD20H (3-Axis Angular Velocity Gyroscope) & Bosch BMP180 (Atmospheric Pressure & Estimated Rel Altitude)`,
+    `# Sensor Notice: L3GD20H measures angular velocity (°/s), not orientation/position. BMP180 measures atmospheric pressure (hPa), altitude is estimated relative to P0.`,
     `# =========================================================================`
   ];
 
@@ -1064,20 +1090,21 @@ app.get('/api/imu/export-csv', (req, res) => {
     'timestamp_epoch_ms',
     'total_session_flight_time_s',
     'current_flight_time_s',
+    'gyro_x_dps',
+    'gyro_y_dps',
+    'gyro_z_dps',
+    'gyro_magnitude_dps',
+    'baro_pressure_hpa',
+    'baro_pressure_pa',
+    'baro_ref_p0_hpa',
+    'baro_altitude_est_m',
+    'temperature_c',
+    'climb_rate_vz_ms',
     'pos_x_east_m',
     'pos_y_north_m',
     'pos_z_alt_m',
     'distance_to_home_m',
     'total_distance_traveled_m',
-    'roll_deg',
-    'pitch_deg',
-    'yaw_heading_deg',
-    'accel_x_g',
-    'accel_y_g',
-    'accel_z_g',
-    'total_g_load',
-    'estimated_altitude_pct',
-    'estimated_altitude_m',
     'raw_roll_channel_1_255',
     'raw_pitch_channel_1_255',
     'raw_throttle_channel_0_255',
@@ -1101,20 +1128,21 @@ app.get('/api/imu/export-csv', (req, res) => {
     s.timestamp_epoch_ms,
     s.total_session_flight_time_s,
     s.current_flight_time_s,
+    s.gyro_x_dps || 0,
+    s.gyro_y_dps || 0,
+    s.gyro_z_dps || 0,
+    s.gyro_magnitude_dps || 0,
+    s.baro_pressure_hpa || 1013.25,
+    s.baro_pressure_pa || 101325,
+    s.baro_ref_p0_hpa || 1013.25,
+    s.baro_altitude_est_m || 0,
+    s.temperature_c || 24.5,
+    s.climb_rate_vz_ms || 0,
     s.pos_x_east_m,
     s.pos_y_north_m,
     s.pos_z_alt_m,
     s.distance_to_home_m,
     s.total_distance_traveled_m,
-    s.roll_deg,
-    s.pitch_deg,
-    s.yaw_heading_deg,
-    s.accel_x_g,
-    s.accel_y_g,
-    s.accel_z_g,
-    s.total_g_load,
-    s.estimated_altitude_pct,
-    s.estimated_altitude_m,
     s.raw_roll_channel_1_255,
     s.raw_pitch_channel_1_255,
     s.raw_throttle_channel_0_255,

@@ -91,3 +91,18 @@ The full source code is located in [`ESP32_Drone_Bridge.ino`](file:///d:/SwarmDr
    - **Blink rapidly**: Scanning and connecting to the drone's Wi-Fi network.
    - **Stay solid blue ON**: Wi-Fi connection locked and UDP socket active!
 3. Open the Serial Monitor at `115200 baud` or use the Web GCS terminal to send `P` (Ping) to verify status.
+
+---
+
+## 5. Onboard Drone Sensors (L3GD20H & BMP180)
+
+The target drone physically carries **only two sensors**:
+1. **ST L3GD20H (3-Axis Gyroscope)**:
+   - Measures **angular velocity** ($\omega_x, \omega_y, \omega_z$ in °/s) around X, Y, and Z axes.
+   - **Does NOT directly measure orientation or position**.
+   - Zero-bias calibration is triggered by command `0x80` (`'g'` / `'G'`).
+2. **Bosch BMP180 (Barometric Sensor)**:
+   - Measures **atmospheric pressure** ($P$ in hPa / Pa) and temperature ($T$).
+   - Estimates **altitude relative to ground pressure ($P_0$)** via $h = 44330 \cdot (1 - (P / P_0)^{1 / 5.255})$.
+   - **Is NOT a direct height sensor** (height is calculated from barometric pressure changes relative to $P_0$).
+   - Ground tare feature zeros relative altitude by setting $P_0$ to current ground pressure.

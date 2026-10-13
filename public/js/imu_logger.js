@@ -1,17 +1,10 @@
 /**
- * Drone 6-DOF IMU Telemetry, 3D Local Coordinate Tracker (0,0,0 Origin), Real-Time Flight Logger & CSV/Excel Exporter
- * 
- * Captures, computes, and logs:
- * - 3D Local Coordinates: X (East/Lateral m), Y (North/Forward m), Z (Altitude m) with start point at (0,0,0)
- * - Navigation & Odometry: Distance from Home (m), Total Distance Traveled (m), Ground Speed (m/s & km/h), Climb Velocity (m/s)
- * - Attitude Angles: Roll (deg), Pitch (deg), Yaw / Heading (deg)
- * - Tri-Axial Angular Velocity / Gyro Rates: wx (deg/s), wy (deg/s), wz (deg/s)
- * - Tri-Axial Linear Acceleration: Ax (g), Ay (g), Az (g), and Total G-Force (g)
- * - Altitude Hold & Vertical Velocity: Estimated Alt (%), Estimated Alt (m), Vz (m/s)
- * - Raw 8-bit Stick & Protocol Channels: Roll (1-255), Pitch (1-255), Throttle (0-255), Yaw (1-255)
- * - Flight Timers: Active Sortie Flight Time (seconds), Total Cumulative Session Flight Time (seconds)
- * - Flight Modes & Trims: Roll/Pitch/Yaw Trims, Altitude Hold, Headless, Gyro Calibration, 360 Stunt Flip
- * - Network Link Stats: Latency (ms), Packets TX/RX
+ * Drone Onboard Sensor Telemetry, Real-Time Flight Logger & CSV/Excel Exporter
+ * Dedicated Hardware Sensors:
+ * 1. 3-Axis Gyroscope (L3GD20H): Measures angular velocity around the X, Y and Z axes (ωx, ωy, ωz in °/s).
+ *    Note: Does not directly measure orientation or position.
+ * 2. Barometric Sensor (BMP180): Measures atmospheric pressure (hPa) and estimates altitude relative to reference pressure (P₀).
+ *    Note: It is not a direct height sensor.
  */
 
 class DroneIMULogger {
@@ -29,7 +22,7 @@ class DroneIMULogger {
     this.sessionSorties = [];    // Archive of finished sorties
     this.logs = this.currentSortieLogs; // Primary display buffer
 
-    // Hardware Physical Sensor Ingestion (USB Serial / Bluetooth / MPU-6050)
+    // Hardware Physical Sensor Ingestion (USB Serial / Bluetooth / ESP32)
     this.hardwareSensorActive = false;
     this.externalSensorData = null;
     
@@ -46,24 +39,37 @@ class DroneIMULogger {
     this.lastLogTimestamp = 0;
     this.heartbeatIntervalMs = 5000; // 5s periodic summary heartbeat when flying, 10s when idle
 
-    // ----------------- 3D LOCAL COORDINATES (Origin 0,0,0) ----------------- //
-    this.posX = 0.0; // East / Lateral displacement (meters) relative to start point (0,0,0)
-    this.posY = 0.0; // North / Forward displacement (meters) relative to start point (0,0,0)
-    this.posZ = 0.0; // Altitude / Vertical displacement (meters) relative to start point (0,0,0)
-    
-    this.velX = 0.0; // Lateral ground velocity (m/s)
-    this.velY = 0.0; // Forward ground velocity (m/s)
-    this.velZ = 0.0; // Vertical climb rate (m/s)
-    this.groundSpeed = 0.0; // 2D Ground speed magnitude (m/s)
-    this.distanceToHome = 0.0; // 3D Euclidean distance to (0,0,0)
-    this.totalDistanceTraveled = 0.0; // Cumulative odometer (meters)
-    this.groundReferenceAlt = 0.0; // Takeoff reference altitude
+    // ----------------- HARDWARE ONBOARD SENSORS ----------------- //
+    // 1. 3-Axis Gyroscope (L3GD20H): Angular velocities around X, Y, Z axes (deg/s)
+    this.gyroX = 0.0; // Roll rate ωx (°/s)
+    this.gyroY = 0.0; // Pitch rate ωy (°/s)
+    this.gyroZ = 0.0; // Yaw rate ωz (°/s)
+    this.gyroMagnitude = 0.0; // ||ω|| rate magnitude (°/s)
+
+    // 2. Barometric Pressure Sensor (BMP180): Pressure (hPa), Estimated Alt (m), Temp (°C)
+    this.pressureHpa = 1013.25; // Atmospheric pressure in hPa
+    this.pressurePa = 101325.0; // Atmospheric pressure in Pa
+    this.referencePressureHpa = 1013.25; // Reference baseline ground pressure P0
+    this.baroAltitudeM = 0.0; // Estimated relative altitude relative to P0
+    this.temperatureC = 25.0; // BMP180 sensor temperature (°C)
+
+    // 3D Local Coordinates & Kinematics
+    this.posX = 0.0;
+    this.posY = 0.0;
+    this.posZ = 0.0; // Synced with baroAltitudeM
+    this.velX = 0.0;
+    this.velY = 0.0;
+    this.velZ = 0.0; // Climb rate m/s
+    this.groundSpeed = 0.0;
+    this.distanceToHome = 0.0;
+    this.totalDistanceTraveled = 0.0;
+    this.groundReferenceAlt = 0.0;
 
     // 2D Flight Path Breadcrumb Trail for Top-Down Radar Minimap
     this.maxTrailPoints = 350;
     this.pathTrail = [{ x: 0, y: 0, z: 0, heading: 0, time: 0 }];
 
-    // Continuous 6-DOF Dynamic State Integrators (Floating Point Precision)
+    // Continuous Dynamic State Integrators
     this.curRollDeg = 0.0;
     this.curPitchDeg = 0.0;
     this.curYawDeg = 0.0;
@@ -71,14 +77,14 @@ class DroneIMULogger {
     this.curGyroPitch = 0.0;
     this.curGyroYaw = 0.0;
 
-    // Previous state for numerical derivatives (calculating angular rates & accelerations)
+    // Previous state for numerical derivatives
     this.lastSampleTime = performance.now();
     this.prevRoll = 0.0;
     this.prevPitch = 0.0;
     this.prevYaw = 0.0;
     this.prevAltitude = 0.0;
 
-    // Filtered / Smoothed IMU State
+    // Filtered / Smoothed Sensor Telemetry State
     this.currentIMU = {
       timestampIso: new Date().toISOString(),
       timestampEpoch: Date.now(),
@@ -88,7 +94,28 @@ class DroneIMULogger {
       flightEvent: 'INITIALIZE',
       flightStatus: 'GROUND',
 
-      // 3D Coordinates (0,0,0 Origin)
+      // L3GD20H 3-Axis Gyroscope (Angular Velocity)
+      gyroX: 0.0,
+      gyroY: 0.0,
+      gyroZ: 0.0,
+      gyroMagnitude: 0.0,
+
+      // BMP180 Barometric Sensor
+      pressureHpa: 1013.25,
+      pressurePa: 101325.0,
+      referencePressureHpa: 1013.25,
+      baroAltitudeM: 0.0,
+      temperatureC: 25.0,
+      climbRateMs: 0.0,
+
+      // Backwards-compatible aliases
+      gyroRollRate: 0.0,
+      gyroPitchRate: 0.0,
+      gyroYawRate: 0.0,
+      altitudeMeters: 0.0,
+      altitudePct: 0,
+
+      // 3D Local Coordinates (0,0,0 Origin)
       posX: 0.0,
       posY: 0.0,
       posZ: 0.0,
@@ -103,22 +130,6 @@ class DroneIMULogger {
       rollDeg: 0.0,
       pitchDeg: 0.0,
       yawDeg: 0.0,
-
-      // Gyro Rates (deg/s)
-      gyroRollRate: 0.0,
-      gyroPitchRate: 0.0,
-      gyroYawRate: 0.0,
-
-      // Accelerometer (g & m/s^2)
-      accelX: 0.0,
-      accelY: 0.0,
-      accelZ: 1.0,
-      totalG: 1.0,
-
-      // Altitude
-      altitudePct: 0,
-      altitudeMeters: 0,
-      climbRateMs: 0,
 
       // Raw Hardware Channels (1..255)
       rawRoll: 128,
@@ -145,27 +156,25 @@ class DroneIMULogger {
     this.historyLen = 120;
     this.history = {
       time: [],
+      gyroX: [],
+      gyroY: [],
+      gyroZ: [],
+      pressure: [],
+      altitude: [],
       roll: [],
       pitch: [],
-      yaw: [],
-      accelZ: [],
-      totalG: [],
-      gyroRoll: [],
-      gyroPitch: [],
-      gyroYaw: [],
-      posX: [],
-      posY: [],
-      posZ: []
+      yaw: []
     };
 
     // UI Tab & Filter State
     this.currentTab = 'tab-overview';
     this.logSearchTerm = '';
     this.activeWaveChannels = {
-      roll: true,
-      pitch: true,
-      accelZ: true,
-      gyroRoll: true
+      gyroX: true,
+      gyroY: true,
+      gyroZ: true,
+      pressure: true,
+      altitude: true
     };
 
     // Start 50ms high-precision flight timer loop
@@ -204,6 +213,22 @@ class DroneIMULogger {
     this.prevYaw = heading;
     this.pathTrail = [{ x: this.posX, y: this.posY, z: this.posZ, heading: this.curYawDeg, time: this.currentSortieFlightTime }];
     this.updateUI();
+  }
+
+  /**
+   * Sets the reference ground pressure (P0) for BMP180 barometric altitude estimation.
+   * Calibrates current altitude reading to 0.00m.
+   */
+  tareReferencePressure(p0) {
+    if (typeof p0 === 'number' && p0 > 300 && p0 < 1200) {
+      this.referencePressureHpa = parseFloat(p0.toFixed(2));
+    } else {
+      this.referencePressureHpa = parseFloat(this.pressureHpa.toFixed(2));
+    }
+    this.baroAltitudeM = 0.0;
+    this.posZ = 0.0;
+    this.updateUI();
+    console.log(`[BMP180] Ground reference pressure calibrated: P0 = ${this.referencePressureHpa} hPa (Relative Alt = 0.00m)`);
   }
 
   /**
@@ -283,21 +308,59 @@ class DroneIMULogger {
   }
 
   /**
-   * Ingests real physical telemetry from external hardware (ESP32, Arduino, MPU-6050, or WebSocket)
+   * Ingests real physical telemetry from external hardware (ESP32, Arduino, L3GD20H, BMP180, or WebSocket)
    */
   injectHardwareTelemetry(sensorData = {}) {
     this.hardwareSensorActive = true;
     this.externalSensorData = sensorData;
 
+    // L3GD20H 3-Axis Gyroscope inputs (deg/s)
+    if (typeof sensorData.gyroX === 'number') this.gyroX = sensorData.gyroX;
+    else if (typeof sensorData.gx === 'number') this.gyroX = sensorData.gx;
+    else if (typeof sensorData.wx === 'number') this.gyroX = sensorData.wx;
+    else if (typeof sensorData.gyroRoll === 'number') this.gyroX = sensorData.gyroRoll;
+
+    if (typeof sensorData.gyroY === 'number') this.gyroY = sensorData.gyroY;
+    else if (typeof sensorData.gy === 'number') this.gyroY = sensorData.gy;
+    else if (typeof sensorData.wy === 'number') this.gyroY = sensorData.wy;
+    else if (typeof sensorData.gyroPitch === 'number') this.gyroY = sensorData.gyroPitch;
+
+    if (typeof sensorData.gyroZ === 'number') this.gyroZ = sensorData.gyroZ;
+    else if (typeof sensorData.gz === 'number') this.gyroZ = sensorData.gz;
+    else if (typeof sensorData.wz === 'number') this.gyroZ = sensorData.wz;
+    else if (typeof sensorData.gyroYaw === 'number') this.gyroZ = sensorData.gyroYaw;
+
+    this.gyroMagnitude = Math.sqrt(this.gyroX * this.gyroX + this.gyroY * this.gyroY + this.gyroZ * this.gyroZ);
+
+    // BMP180 Barometric Sensor inputs
+    if (typeof sensorData.pressure === 'number') this.pressureHpa = sensorData.pressure;
+    else if (typeof sensorData.press === 'number') this.pressureHpa = sensorData.press;
+    else if (typeof sensorData.p === 'number') this.pressureHpa = sensorData.p;
+
+    if (typeof sensorData.temperature === 'number') this.temperatureC = sensorData.temperature;
+    else if (typeof sensorData.temp === 'number') this.temperatureC = sensorData.temp;
+    else if (typeof sensorData.t === 'number') this.temperatureC = sensorData.t;
+
+    if (typeof sensorData.referencePressure === 'number') this.referencePressureHpa = sensorData.referencePressure;
+    else if (typeof sensorData.p0 === 'number') this.referencePressureHpa = sensorData.p0;
+
+    if (typeof sensorData.altitude === 'number') {
+      this.baroAltitudeM = sensorData.altitude;
+      this.posZ = sensorData.altitude;
+    } else if (this.referencePressureHpa > 0) {
+      this.baroAltitudeM = 44330.0 * (1.0 - Math.pow(this.pressureHpa / this.referencePressureHpa, 1 / 5.255));
+      this.posZ = this.baroAltitudeM;
+    }
+
     const pill = document.getElementById('imuHardwarePill');
     if (pill) {
-      pill.textContent = 'HARDWARE SENSOR: ACTIVE';
+      pill.textContent = 'L3GD20H & BMP180 ACTIVE';
       pill.className = 'v-tag v-tag-rec text-emerald';
     }
   }
 
   /**
-   * Connect to real physical hardware sensor via Web Serial API (USB COM / ESP32 / Arduino / MPU6050)
+   * Connect to real physical hardware sensor via Web Serial API (USB COM / ESP32 / Arduino)
    */
   async connectSerialSensor() {
     if (!('serial' in navigator)) {
@@ -331,32 +394,28 @@ class DroneIMULogger {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
-            // Check if JSON: {"roll": 1.2, "pitch": -0.5, "yaw": 180, "ax": 0.02, "ay": -0.01, "az": 1.0, "alt": 0.85}
+            // Check if JSON: {"gx": 1.2, "gy": -0.5, "gz": 0.0, "press": 1013.25, "temp": 25.4, "alt": 0.85}
             if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
               const parsed = JSON.parse(trimmed);
               this.injectHardwareTelemetry({
-                roll: parsed.roll ?? parsed.r,
-                pitch: parsed.pitch ?? parsed.p,
-                yaw: parsed.yaw ?? parsed.y,
-                accelX: parsed.accelX ?? parsed.ax,
-                accelY: parsed.accelY ?? parsed.ay,
-                accelZ: parsed.accelZ ?? parsed.az,
-                gyroRoll: parsed.gyroRoll ?? parsed.gx,
-                gyroPitch: parsed.gyroPitch ?? parsed.gy,
-                gyroYaw: parsed.gyroYaw ?? parsed.gz,
-                altitude: parsed.altitude ?? parsed.alt
+                gyroX: parsed.gyroX ?? parsed.gx ?? parsed.wx ?? parsed.gyroRoll,
+                gyroY: parsed.gyroY ?? parsed.gy ?? parsed.wy ?? parsed.gyroPitch,
+                gyroZ: parsed.gyroZ ?? parsed.gz ?? parsed.wz ?? parsed.gyroYaw,
+                pressure: parsed.pressure ?? parsed.press ?? parsed.p,
+                temperature: parsed.temperature ?? parsed.temp ?? parsed.t,
+                altitude: parsed.altitude ?? parsed.alt ?? parsed.h,
+                referencePressure: parsed.referencePressure ?? parsed.p0
               });
-            } else if (trimmed.startsWith('IMU,') || trimmed.startsWith('MPU,')) {
-              // CSV line: IMU,roll,pitch,yaw,ax,ay,az,alt
+            } else if (trimmed.startsWith('SENSOR,') || trimmed.startsWith('L3GD20H,') || trimmed.startsWith('BMP180,')) {
+              // CSV line: SENSOR,gx,gy,gz,pressure,temp,alt
               const p = trimmed.split(',');
               this.injectHardwareTelemetry({
-                roll: parseFloat(p[1]),
-                pitch: parseFloat(p[2]),
-                yaw: parseFloat(p[3]),
-                accelX: parseFloat(p[4]),
-                accelY: parseFloat(p[5]),
-                accelZ: parseFloat(p[6]),
-                altitude: p[7] ? parseFloat(p[7]) : undefined
+                gyroX: parseFloat(p[1]),
+                gyroY: parseFloat(p[2]),
+                gyroZ: parseFloat(p[3]),
+                pressure: p[4] ? parseFloat(p[4]) : undefined,
+                temperature: p[5] ? parseFloat(p[5]) : undefined,
+                altitude: p[6] ? parseFloat(p[6]) : undefined
               });
             }
           } catch (e) {}
@@ -519,6 +578,31 @@ class DroneIMULogger {
       flightEvent: forcedEvent || src.flightEvent || (this.isAirborne ? 'AIRBORNE' : 'GROUND'),
       flightStatus: this.isAirborne ? 'AIRBORNE' : 'GROUND',
 
+      // L3GD20H 3-Axis Gyroscope (Angular Velocity in °/s)
+      gyroX: typeof src.gyroX === 'number' ? src.gyroX : (typeof src.gyroRollRate === 'number' ? src.gyroRollRate : this.gyroX),
+      gyroY: typeof src.gyroY === 'number' ? src.gyroY : (typeof src.gyroPitchRate === 'number' ? src.gyroPitchRate : this.gyroY),
+      gyroZ: typeof src.gyroZ === 'number' ? src.gyroZ : (typeof src.gyroYawRate === 'number' ? src.gyroYawRate : this.gyroZ),
+      gyroMagnitude: typeof src.gyroMagnitude === 'number' ? src.gyroMagnitude : this.gyroMagnitude,
+
+      // BMP180 Barometric Pressure Sensor
+      pressureHpa: typeof src.pressureHpa === 'number' ? src.pressureHpa : this.pressureHpa,
+      pressurePa: typeof src.pressurePa === 'number' ? src.pressurePa : (this.pressureHpa * 100),
+      referencePressureHpa: typeof src.referencePressureHpa === 'number' ? src.referencePressureHpa : this.referencePressureHpa,
+      baroAltitudeM: typeof src.baroAltitudeM === 'number' ? src.baroAltitudeM : (typeof src.altitudeMeters === 'number' ? src.altitudeMeters : this.baroAltitudeM),
+      temperatureC: typeof src.temperatureC === 'number' ? src.temperatureC : this.temperatureC,
+      climbRateMs: typeof src.climbRateMs === 'number' ? src.climbRateMs : parseFloat(this.velZ.toFixed(2)),
+
+      // Backwards-compatible aliases
+      gyroRollRate: typeof src.gyroX === 'number' ? src.gyroX : (typeof src.gyroRollRate === 'number' ? src.gyroRollRate : this.gyroX),
+      gyroPitchRate: typeof src.gyroY === 'number' ? src.gyroY : (typeof src.gyroPitchRate === 'number' ? src.gyroPitchRate : this.gyroY),
+      gyroYawRate: typeof src.gyroZ === 'number' ? src.gyroZ : (typeof src.gyroYawRate === 'number' ? src.gyroYawRate : this.gyroZ),
+      accelX: typeof src.accelX === 'number' ? src.accelX : 0,
+      accelY: typeof src.accelY === 'number' ? src.accelY : 0,
+      accelZ: typeof src.accelZ === 'number' ? src.accelZ : 1.0,
+      totalG: typeof src.totalG === 'number' ? src.totalG : 1.0,
+      altitudePct: src.altitudePct || 0,
+      altitudeMeters: typeof src.baroAltitudeM === 'number' ? src.baroAltitudeM : parseFloat(this.posZ.toFixed(2)),
+
       // 3D Local Coordinates (0,0,0 Origin)
       posX: parseFloat(this.posX.toFixed(3)),
       posY: parseFloat(this.posY.toFixed(3)),
@@ -535,22 +619,6 @@ class DroneIMULogger {
       rollDeg: typeof src.rollDeg === 'number' ? src.rollDeg : 0,
       pitchDeg: typeof src.pitchDeg === 'number' ? src.pitchDeg : 0,
       yawDeg: typeof src.yawDeg === 'number' ? src.yawDeg : 0,
-
-      // Gyro Rates (deg/s)
-      gyroRollRate: typeof src.gyroRollRate === 'number' ? src.gyroRollRate : 0,
-      gyroPitchRate: typeof src.gyroPitchRate === 'number' ? src.gyroPitchRate : 0,
-      gyroYawRate: typeof src.gyroYawRate === 'number' ? src.gyroYawRate : 0,
-
-      // Accelerometer (g)
-      accelX: typeof src.accelX === 'number' ? src.accelX : 0,
-      accelY: typeof src.accelY === 'number' ? src.accelY : 0,
-      accelZ: typeof src.accelZ === 'number' ? src.accelZ : 1.0,
-      totalG: typeof src.totalG === 'number' ? src.totalG : 1.0,
-
-      // Altitude
-      altitudePct: src.altitudePct || 0,
-      altitudeMeters: parseFloat(this.posZ.toFixed(2)),
-      climbRateMs: parseFloat(this.velZ.toFixed(2)),
 
       // Raw Hardware Channels (1..255)
       rawRoll: src.rawRoll !== undefined ? src.rawRoll : 128,
@@ -654,37 +722,34 @@ class DroneIMULogger {
       if (typeof this.externalSensorData.yaw === 'number') { yawDeg = this.externalSensorData.yaw; this.curYawDeg = yawDeg; }
     }
 
-    // 2. Continuous Angular Velocities (Gyroscope Rates in deg/s)
-    let gyroRollRate = parseFloat(((this.curRollDeg - this.prevRoll) / dt).toFixed(2));
-    let gyroPitchRate = parseFloat(((this.curPitchDeg - this.prevPitch) / dt).toFixed(2));
-    let gyroYawRate = parseFloat(this.curGyroYaw.toFixed(2));
-
-    // 3. Accelerometer & G-Force Load
-    const rollRad = (this.curRollDeg * Math.PI) / 180;
-    const pitchRad = (this.curPitchDeg * Math.PI) / 180;
-    const yawRad = (this.curYawDeg * Math.PI) / 180;
-    
-    // Natural micro-vibrations from motor spin
-    const motorVibX = isMotorsSpinning ? (Math.sin(now * 0.035) * 0.006 + (Math.random() - 0.5) * 0.004) : 0;
-    const motorVibY = isMotorsSpinning ? (Math.cos(now * 0.041) * 0.006 + (Math.random() - 0.5) * 0.004) : 0;
-    const motorVibZ = isMotorsSpinning ? (Math.sin(now * 0.048) * 0.008 + (Math.random() - 0.5) * 0.005) : 0;
-
-    const thrOffsetG = (rawThrottle - 128) / 127.0;
-    const verticalThrustG = isMotorsSpinning ? Math.max(0.85, 1.0 + thrOffsetG * 0.20) : 1.0;
-    let accelX = parseFloat((Math.sin(pitchRad) + motorVibX).toFixed(3));
-    let accelY = parseFloat((-Math.sin(rollRad) * Math.cos(pitchRad) + motorVibY).toFixed(3));
-    let accelZ = parseFloat((Math.cos(rollRad) * Math.cos(pitchRad) * verticalThrustG + motorVibZ).toFixed(3));
+    // 2. L3GD20H 3-Axis Gyroscope Angular Velocities (deg/s)
+    // Measures angular velocity around the X, Y, and Z axes. Does NOT directly measure orientation or position.
+    let gyroX = parseFloat(((this.curRollDeg - this.prevRoll) / dt).toFixed(2));
+    let gyroY = parseFloat(((this.curPitchDeg - this.prevPitch) / dt).toFixed(2));
+    let gyroZ = parseFloat(this.curGyroYaw.toFixed(2));
 
     if (this.hardwareSensorActive && this.externalSensorData) {
-      if (typeof this.externalSensorData.accelX === 'number') accelX = this.externalSensorData.accelX;
-      if (typeof this.externalSensorData.accelY === 'number') accelY = this.externalSensorData.accelY;
-      if (typeof this.externalSensorData.accelZ === 'number') accelZ = this.externalSensorData.accelZ;
-      if (typeof this.externalSensorData.gyroRoll === 'number') gyroRollRate = this.externalSensorData.gyroRoll;
-      if (typeof this.externalSensorData.gyroPitch === 'number') gyroPitchRate = this.externalSensorData.gyroPitch;
-      if (typeof this.externalSensorData.gyroYaw === 'number') gyroYawRate = this.externalSensorData.gyroYaw;
+      if (typeof this.externalSensorData.gyroX === 'number') gyroX = this.externalSensorData.gyroX;
+      else if (typeof this.externalSensorData.gyroRoll === 'number') gyroX = this.externalSensorData.gyroRoll;
+      if (typeof this.externalSensorData.gyroY === 'number') gyroY = this.externalSensorData.gyroY;
+      else if (typeof this.externalSensorData.gyroPitch === 'number') gyroY = this.externalSensorData.gyroPitch;
+      if (typeof this.externalSensorData.gyroZ === 'number') gyroZ = this.externalSensorData.gyroZ;
+      else if (typeof this.externalSensorData.gyroYaw === 'number') gyroZ = this.externalSensorData.gyroYaw;
     }
 
-    const totalG = parseFloat(Math.sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ).toFixed(2));
+    this.gyroX = gyroX;
+    this.gyroY = gyroY;
+    this.gyroZ = gyroZ;
+    this.gyroMagnitude = parseFloat(Math.hypot(this.gyroX, this.gyroY, this.gyroZ).toFixed(2));
+
+    // Retain legacy aliases for backwards compatibility with any mission runner listeners
+    let gyroRollRate = this.gyroX;
+    let gyroPitchRate = this.gyroY;
+    let gyroYawRate = this.gyroZ;
+    let accelX = 0.0;
+    let accelY = 0.0;
+    let accelZ = 1.0;
+    let totalG = 1.0;
 
     // 4. Realistic Optical-Flow Altitude Hold & Climb Dynamics
     let maxLinearSpeed = 0.65; // m/s (Gear 2 baseline ~0.65 m/s)
@@ -784,7 +849,46 @@ class DroneIMULogger {
     this.prevYaw = yawDeg;
     this.prevAltitude = this.posZ;
 
+    // 3. BMP180 Barometric Pressure & Relative Altitude Estimation
+    // Atmospheric pressure decreases with altitude: P = P0 * (1 - h / 44330)^5.255
+    const baroNoise = (Math.random() - 0.5) * 0.04;
+    let simPress = this.referencePressureHpa * Math.pow(Math.max(0.01, 1.0 - (this.posZ / 44330.0)), 5.255) + baroNoise;
+    let pressHpa = parseFloat(simPress.toFixed(2));
+    let pressPa = parseFloat((pressHpa * 100).toFixed(1));
+    let baroAlt = parseFloat((44330.0 * (1.0 - Math.pow(pressHpa / this.referencePressureHpa, 1.0 / 5.255))).toFixed(3));
+    let tempC = this.temperatureC;
+
+    if (this.hardwareSensorActive && this.externalSensorData) {
+      if (typeof this.externalSensorData.pressure === 'number') {
+        pressHpa = this.externalSensorData.pressure;
+        pressPa = parseFloat((pressHpa * 100).toFixed(1));
+        baroAlt = parseFloat((44330.0 * (1.0 - Math.pow(pressHpa / this.referencePressureHpa, 1.0 / 5.255))).toFixed(3));
+      }
+      if (typeof this.externalSensorData.baroAltitude === 'number') {
+        baroAlt = this.externalSensorData.baroAltitude;
+      }
+      if (typeof this.externalSensorData.temperature === 'number') {
+        tempC = this.externalSensorData.temperature;
+      }
+    }
+
+    this.pressureHpa = pressHpa;
+    this.pressurePa = pressPa;
+    this.baroAltitudeM = baroAlt;
+    this.temperatureC = tempC;
+    this.temperatureF = parseFloat((tempC * 9 / 5 + 32).toFixed(1));
+
     const sample = this._createSampleObject({
+      gyroX: this.gyroX,
+      gyroY: this.gyroY,
+      gyroZ: this.gyroZ,
+      gyroMagnitude: this.gyroMagnitude,
+      pressureHpa: this.pressureHpa,
+      pressurePa: this.pressurePa,
+      referencePressureHpa: this.referencePressureHpa,
+      baroAltitudeM: this.baroAltitudeM,
+      temperatureC: this.temperatureC,
+      climbRateMs: this.velZ,
       rollDeg, pitchDeg, yawDeg,
       gyroRollRate, gyroPitchRate, gyroYawRate,
       accelX, accelY, accelZ, totalG,
@@ -808,6 +912,12 @@ class DroneIMULogger {
 
     // Push into rolling waveform history buffer
     this.history.time.push(sample.flightTime);
+    this.history.gyroX.push(sample.gyroX);
+    this.history.gyroY.push(sample.gyroY);
+    this.history.gyroZ.push(sample.gyroZ);
+    this.history.pressure.push(sample.pressureHpa);
+    this.history.altitude.push(sample.baroAltitudeM);
+    // Legacy support
     this.history.roll.push(sample.rollDeg);
     this.history.pitch.push(sample.pitchDeg);
     this.history.yaw.push(sample.yawDeg);
@@ -820,8 +930,13 @@ class DroneIMULogger {
     this.history.posY.push(sample.posY);
     this.history.posZ.push(sample.posZ);
 
-    while (this.history.roll.length > this.historyLen) {
+    while (this.history.gyroX.length > this.historyLen) {
       this.history.time.shift();
+      this.history.gyroX.shift();
+      this.history.gyroY.shift();
+      this.history.gyroZ.shift();
+      this.history.pressure.shift();
+      this.history.altitude.shift();
       this.history.roll.shift();
       this.history.pitch.shift();
       this.history.yaw.shift();
@@ -866,6 +981,28 @@ class DroneIMULogger {
 
     const btnZeroCockpit = document.getElementById('btnCockpitZero');
     if (btnZeroCockpit) btnZeroCockpit.addEventListener('click', () => this.resetCoordinates(0, 0, 0));
+
+    // Tare BMP180 Ground Reference Pressure (P0) buttons
+    const btnTareCockpit = document.getElementById('btnTareBaroCockpit');
+    if (btnTareCockpit) btnTareCockpit.addEventListener('click', () => this.tareReferencePressure());
+
+    const btnTareHeader = document.getElementById('btnTareBaroHeader');
+    if (btnTareHeader) btnTareHeader.addEventListener('click', () => this.tareReferencePressure());
+
+    const btnTareModal = document.getElementById('btnTareBaroModal');
+    if (btnTareModal) btnTareModal.addEventListener('click', () => this.tareReferencePressure());
+
+    // L3GD20H Gyroscope zero-bias calibrate button
+    const btnCalibrateGyro = document.getElementById('btnCalibrateGyroModal');
+    if (btnCalibrateGyro) {
+      btnCalibrateGyro.addEventListener('click', () => {
+        if (window.droneController && typeof window.droneController.calibrateGyro === 'function') {
+          window.droneController.calibrateGyro();
+        } else if (typeof window.calibrateGyro === 'function') {
+          window.calibrateGyro();
+        }
+      });
+    }
 
     // Connect real physical hardware sensor (ESP32, Arduino, MPU-6050 via USB)
     const btnConnectSerial = document.getElementById('btnConnectSerialSensor');
@@ -1053,16 +1190,17 @@ class DroneIMULogger {
     // Header summary comments
     const now = new Date();
     const headers = [
-      `# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Telemetry Flight Log`,
+      `# RC UFO Drone Telemetry Flight Log — L3GD20H Gyroscope & BMP180 Barometer`,
       `# Flight Sortie: ${isCurrent ? `${sortieName} (Sortie #${sortieNumber})` : `Complete Session (Total Sorties: ${this.sortieCount})`}`,
       `# Export Scope: ${isCurrent ? 'Single Flight Simulation (Active Sortie Isolated)' : 'Complete Session (All Recorded Sorties)'}`,
       `# Export Timestamp: ${now.toISOString()}`,
+      `# Ground Reference Pressure P0: ${this.referencePressureHpa.toFixed(2)} hPa`,
       `# Reference Origin: Home (0.00m, 0.00m, 0.00m)`,
       `# Current Sortie Flight Time (s): ${sortieDuration.toFixed(2)} (${this.formatDuration(sortieDuration)})`,
       `# Total Session Flight Time (s): ${this.totalSessionFlightTime.toFixed(2)} (${this.formatDurationLong(this.totalSessionFlightTime)})`,
-      `# Total Distance Traveled (m): ${sortieDistance.toFixed(2)} m`,
-      `# Total Samples Logged (Event & Rate): ${samples.length}`,
-      `# Sensor Hardware: 6-Axis IMU (Gyro + Accel) + Barometric Optical Flow`,
+      `# Total Samples Logged: ${samples.length}`,
+      `# Sensors Onboard: ST L3GD20H (3-Axis Angular Velocity Gyroscope) & Bosch BMP180 (Atmospheric Pressure & Estimated Rel Altitude)`,
+      `# Sensor Notice: L3GD20H measures angular velocity (°/s), not orientation/position. BMP180 measures atmospheric pressure (hPa), altitude is estimated relative to P0.`,
       `# Missing Data Policy: Strict (Outputs NaN, No Hardcoded Mock Substitutions)`,
       `# =========================================================================`
     ];
@@ -1077,27 +1215,19 @@ class DroneIMULogger {
       'total_session_flight_time_sec',
       'flight_status',
       'flight_event',
-      'roll_deg',
-      'pitch_deg',
-      'yaw_deg',
       'gyro_x_dps',
       'gyro_y_dps',
       'gyro_z_dps',
-      'acc_x_g',
-      'acc_y_g',
-      'acc_z_g',
-      'total_g_load',
+      'gyro_magnitude_dps',
+      'baro_pressure_hpa',
+      'baro_pressure_pa',
+      'baro_ref_p0_hpa',
+      'baro_altitude_est_m',
+      'temperature_c',
+      'climb_rate_vz_ms',
       'pos_x_m',
       'pos_y_m',
       'pos_z_m',
-      'vel_x_ms',
-      'vel_y_ms',
-      'vel_z_ms',
-      'ground_speed_ms',
-      'ground_speed_kmh',
-      'distance_to_home_m',
-      'total_distance_m',
-      'altitude_pct',
       'raw_roll_channel',
       'raw_pitch_channel',
       'raw_throttle_channel',
@@ -1128,27 +1258,19 @@ class DroneIMULogger {
       vNum(s.totalFlightTime),
       `"${s.flightStatus || 'GROUND'}"`,
       `"${s.flightEvent || 'DATA_POINT'}"`,
-      vNum(s.rollDeg),
-      vNum(s.pitchDeg),
-      vNum(s.yawDeg),
-      vNum(s.gyroRollRate),
-      vNum(s.gyroPitchRate),
-      vNum(s.gyroYawRate),
-      vNum(s.accelX),
-      vNum(s.accelY),
-      vNum(s.accelZ),
-      vNum(s.totalG),
+      vNum(s.gyroX !== undefined ? s.gyroX : s.gyroRollRate),
+      vNum(s.gyroY !== undefined ? s.gyroY : s.gyroPitchRate),
+      vNum(s.gyroZ !== undefined ? s.gyroZ : s.gyroYawRate),
+      vNum(s.gyroMagnitude !== undefined ? s.gyroMagnitude : 0),
+      vNum(s.pressureHpa !== undefined ? s.pressureHpa : this.pressureHpa),
+      vNum(s.pressurePa !== undefined ? s.pressurePa : (this.pressureHpa * 100)),
+      vNum(s.referencePressureHpa !== undefined ? s.referencePressureHpa : this.referencePressureHpa),
+      vNum(s.baroAltitudeM !== undefined ? s.baroAltitudeM : s.posZ),
+      vNum(s.temperatureC !== undefined ? s.temperatureC : this.temperatureC),
+      vNum(s.climbRateMs !== undefined ? s.climbRateMs : s.velZ),
       vNum(s.posX),
       vNum(s.posY),
       vNum(s.posZ),
-      vNum(s.velX),
-      vNum(s.velY),
-      vNum(s.velZ),
-      vNum(s.groundSpeed),
-      vNum(s.groundSpeedKmh),
-      vNum(s.distanceToHome),
-      vNum(s.totalDistanceTraveled),
-      vNum(s.altitudePct),
       vNum(s.rawRoll),
       vNum(s.rawPitch),
       vNum(s.rawThrottle),
@@ -1255,72 +1377,73 @@ class DroneIMULogger {
     const elSession = document.getElementById('imuSessionTime');
     if (elSession) elSession.textContent = this.formatDurationLong(this.totalSessionFlightTime);
 
-    const elTotalG = document.getElementById('imuTotalG');
-    if (elTotalG) elTotalG.textContent = `${s.totalG.toFixed(3)} g`;
+    const elGyroMagTop = document.getElementById('imuGyroRateMag');
+    if (elGyroMagTop) elGyroMagTop.textContent = `${(s.gyroMagnitude !== undefined ? s.gyroMagnitude : 0).toFixed(1)} °/s`;
+
+    const elBaroPressTop = document.getElementById('imuBaroPressTop');
+    if (elBaroPressTop) elBaroPressTop.textContent = `${(s.pressureHpa !== undefined ? s.pressureHpa : this.pressureHpa).toFixed(1)} hPa`;
+
+    const elBaroAltTop = document.getElementById('imuBaroAltTop');
+    if (elBaroAltTop) elBaroAltTop.textContent = `${(s.baroAltitudeM !== undefined ? s.baroAltitudeM : s.posZ).toFixed(2)} m`;
 
     const elCount = document.getElementById('imuSampleCount');
     if (elCount) elCount.textContent = this.logs.length.toLocaleString();
 
-    const elDistHome = document.getElementById('imuDistHomeTop');
-    if (elDistHome) elDistHome.textContent = `${s.distanceToHome.toFixed(2)} m`;
+    // 2. L3GD20H Gyroscope (Angular Velocity in °/s & rad/s)
+    const gX = s.gyroX !== undefined ? s.gyroX : s.gyroRollRate;
+    const gY = s.gyroY !== undefined ? s.gyroY : s.gyroPitchRate;
+    const gZ = s.gyroZ !== undefined ? s.gyroZ : s.gyroYawRate;
+    const gMag = s.gyroMagnitude !== undefined ? s.gyroMagnitude : Math.hypot(gX, gY, gZ);
 
-    const elSpeedTop = document.getElementById('imuSpeedTop');
-    if (elSpeedTop) elSpeedTop.textContent = `${s.groundSpeed.toFixed(2)} m/s`;
-
-    // 2. 3D Local Coordinates
-    const elPosX = document.getElementById('imuPosX');
-    if (elPosX) elPosX.textContent = `${s.posX >= 0 ? '+' : ''}${s.posX.toFixed(2)} m`;
-    const elPosXCm = document.getElementById('imuPosXCm');
-    if (elPosXCm) elPosXCm.textContent = `${(s.posX * 100).toFixed(1)} cm`;
-
-    const elPosY = document.getElementById('imuPosY');
-    if (elPosY) elPosY.textContent = `${s.posY >= 0 ? '+' : ''}${s.posY.toFixed(2)} m`;
-    const elPosYCm = document.getElementById('imuPosYCm');
-    if (elPosYCm) elPosYCm.textContent = `${(s.posY * 100).toFixed(1)} cm`;
-
-    const elPosZ = document.getElementById('imuPosZ');
-    if (elPosZ) elPosZ.textContent = `${s.posZ.toFixed(2)} m`;
-    const elPosZCm = document.getElementById('imuPosZCm');
-    if (elPosZCm) elPosZCm.textContent = `${(s.posZ * 100).toFixed(1)} cm`;
-
-    const elDistHomeSub = document.getElementById('imuDistHomeSub');
-    if (elDistHomeSub) elDistHomeSub.textContent = `${s.distanceToHome.toFixed(2)} m`;
-
-    const elOdo = document.getElementById('imuTotalDistance');
-    if (elOdo) elOdo.textContent = `${s.totalDistanceTraveled.toFixed(2)} m`;
-
-    // 3. 6-DOF IMU (Gyro Rates & Accelerations)
     const elGyroRoll = document.getElementById('imuGyroRoll');
-    if (elGyroRoll) elGyroRoll.textContent = `${s.gyroRollRate >= 0 ? '+' : ''}${s.gyroRollRate.toFixed(1)} °/s`;
+    if (elGyroRoll) elGyroRoll.textContent = `${gX >= 0 ? '+' : ''}${gX.toFixed(1)} °/s`;
     const elGyroPitch = document.getElementById('imuGyroPitch');
-    if (elGyroPitch) elGyroPitch.textContent = `${s.gyroPitchRate >= 0 ? '+' : ''}${s.gyroPitchRate.toFixed(1)} °/s`;
+    if (elGyroPitch) elGyroPitch.textContent = `${gY >= 0 ? '+' : ''}${gY.toFixed(1)} °/s`;
     const elGyroYaw = document.getElementById('imuGyroYaw');
-    if (elGyroYaw) elGyroYaw.textContent = `${s.gyroYawRate >= 0 ? '+' : ''}${s.gyroYawRate.toFixed(1)} °/s`;
+    if (elGyroYaw) elGyroYaw.textContent = `${gZ >= 0 ? '+' : ''}${gZ.toFixed(1)} °/s`;
 
-    const elAccelX = document.getElementById('imuAccelX');
-    if (elAccelX) elAccelX.textContent = `${s.accelX >= 0 ? '+' : ''}${s.accelX.toFixed(3)} g`;
-    const elAccelY = document.getElementById('imuAccelY');
-    if (elAccelY) elAccelY.textContent = `${s.accelY >= 0 ? '+' : ''}${s.accelY.toFixed(3)} g`;
-    const elAccelZ = document.getElementById('imuAccelZ');
-    if (elAccelZ) elAccelZ.textContent = `${s.accelZ.toFixed(3)} g`;
-    const elTotalGCard = document.getElementById('imuTotalGCard');
-    if (elTotalGCard) elTotalGCard.textContent = `${s.totalG.toFixed(3)} g`;
+    const elGyroRollRad = document.getElementById('imuGyroRollRad');
+    if (elGyroRollRad) elGyroRollRad.textContent = `${(gX * Math.PI / 180).toFixed(2)} rad/s`;
+    const elGyroPitchRad = document.getElementById('imuGyroPitchRad');
+    if (elGyroPitchRad) elGyroPitchRad.textContent = `${(gY * Math.PI / 180).toFixed(2)} rad/s`;
+    const elGyroYawRad = document.getElementById('imuGyroYawRad');
+    if (elGyroYawRad) elGyroYawRad.textContent = `${(gZ * Math.PI / 180).toFixed(2)} rad/s`;
 
-    // 4. Odometry & Speed
-    const elGroundSpeed = document.getElementById('imuGroundSpeed');
-    if (elGroundSpeed) elGroundSpeed.textContent = `${s.groundSpeed.toFixed(2)} m/s`;
-    const elGroundSpeedKmh = document.getElementById('imuGroundSpeedKmh');
-    if (elGroundSpeedKmh) elGroundSpeedKmh.textContent = `${(s.groundSpeed * 3.6).toFixed(1)} km/h`;
+    const elGyroRateMagnitude = document.getElementById('imuGyroRateMagnitude');
+    if (elGyroRateMagnitude) elGyroRateMagnitude.textContent = `${gMag.toFixed(1)} °/s`;
 
-    const elClimbRate = document.getElementById('imuClimbRate');
-    if (elClimbRate) elClimbRate.textContent = `${s.velZ >= 0 ? '+' : ''}${s.velZ.toFixed(2)} m/s`;
+    const elGyroStatusTag = document.getElementById('imuGyroStatusTag');
+    if (elGyroStatusTag) elGyroStatusTag.textContent = s.gyroCalibrating ? 'CALIBRATING...' : 'ACTIVE (0x80 OK)';
 
-    const elAltMeters = document.getElementById('imuAltMeters');
-    if (elAltMeters) elAltMeters.textContent = `${s.altitudeMeters.toFixed(2)} m`;
-    const elAltPct = document.getElementById('imuAltPct');
-    if (elAltPct) elAltPct.textContent = `${s.altitudePct}%`;
+    // 3. BMP180 Barometric Pressure & Relative Altitude Estimation
+    const pressHpa = s.pressureHpa !== undefined ? s.pressureHpa : this.pressureHpa;
+    const pressPa = s.pressurePa !== undefined ? s.pressurePa : (pressHpa * 100);
+    const altM = s.baroAltitudeM !== undefined ? s.baroAltitudeM : s.posZ;
+    const tempC = s.temperatureC !== undefined ? s.temperatureC : this.temperatureC;
+    const climbMs = s.climbRateMs !== undefined ? s.climbRateMs : s.velZ;
 
-    // 5. Hardware Channels
+    const elBaroPressHpa = document.getElementById('imuBaroPressureHpa');
+    if (elBaroPressHpa) elBaroPressHpa.textContent = `${pressHpa.toFixed(2)} hPa`;
+    const elBaroPressPa = document.getElementById('imuBaroPressurePa');
+    if (elBaroPressPa) elBaroPressPa.textContent = `${Math.round(pressPa)} Pa`;
+
+    const elBaroAltM = document.getElementById('imuBaroAltMeters');
+    if (elBaroAltM) elBaroAltM.textContent = `${altM >= 0 ? '+' : ''}${altM.toFixed(2)} m`;
+    const elBaroAltCm = document.getElementById('imuBaroAltCm');
+    if (elBaroAltCm) elBaroAltCm.textContent = `${(altM * 100).toFixed(0)} cm`;
+
+    const elBaroTempC = document.getElementById('imuBaroTempC');
+    if (elBaroTempC) elBaroTempC.textContent = `${tempC.toFixed(1)} °C`;
+    const elBaroTempF = document.getElementById('imuBaroTempF');
+    if (elBaroTempF) elBaroTempF.textContent = `${(tempC * 9 / 5 + 32).toFixed(1)} °F`;
+
+    const elBaroClimb = document.getElementById('imuBaroClimbRate');
+    if (elBaroClimb) elBaroClimb.textContent = `${climbMs >= 0 ? '+' : ''}${climbMs.toFixed(2)} m/s`;
+
+    const elBaroRefP0 = document.getElementById('imuBaroRefP0');
+    if (elBaroRefP0) elBaroRefP0.textContent = `${this.referencePressureHpa.toFixed(2)} hPa`;
+
+    // 4. Raw 8-Bit Channels & Link State
     const elRawRoll = document.getElementById('imuRawRoll');
     if (elRawRoll) elRawRoll.textContent = `${s.rawRoll}`;
     const elRawPitch = document.getElementById('imuRawPitch');
@@ -1335,26 +1458,22 @@ class DroneIMULogger {
     const elAltHold = document.getElementById('imuAltHold');
     if (elAltHold) elAltHold.textContent = s.altHold ? 'LOCK ON' : 'OFF';
 
-    // 6. Main Dashboard Mini IMU Deck
-    const mainPosX = document.getElementById('mainImuPosX');
-    if (mainPosX) mainPosX.textContent = `${s.posX >= 0 ? '+' : ''}${s.posX.toFixed(2)}m`;
-    const mainPosY = document.getElementById('mainImuPosY');
-    if (mainPosY) mainPosY.textContent = `${s.posY >= 0 ? '+' : ''}${s.posY.toFixed(2)}m`;
-    const mainPosZ = document.getElementById('mainImuPosZ');
-    if (mainPosZ) mainPosZ.textContent = `${s.posZ.toFixed(2)}m`;
-    const mainDist = document.getElementById('mainImuDist');
-    if (mainDist) mainDist.textContent = `${s.distanceToHome.toFixed(2)}m`;
-    const mainSpeed = document.getElementById('mainImuSpeed');
-    if (mainSpeed) mainSpeed.textContent = `${s.groundSpeed.toFixed(2)} m/s`;
-    const mainGLoad = document.getElementById('mainImuGLoad');
-    if (mainGLoad) mainGLoad.textContent = `${s.totalG.toFixed(2)}g`;
+    // 5. Cockpit Main Panel: Onboard Sensors (L3GD20H & BMP180)
+    const mainGyroX = document.getElementById('mainGyroX');
+    if (mainGyroX) mainGyroX.textContent = `${gX >= 0 ? '+' : ''}${gX.toFixed(1)} °/s`;
+    const mainGyroY = document.getElementById('mainGyroY');
+    if (mainGyroY) mainGyroY.textContent = `${gY >= 0 ? '+' : ''}${gY.toFixed(1)} °/s`;
+    const mainGyroZ = document.getElementById('mainGyroZ');
+    if (mainGyroZ) mainGyroZ.textContent = `${gZ >= 0 ? '+' : ''}${gZ.toFixed(1)} °/s`;
 
-    const mainGyroW = document.getElementById('mainImuGyroRates');
-    if (mainGyroW) mainGyroW.textContent = `${s.gyroRollRate.toFixed(0)} / ${s.gyroPitchRate.toFixed(0)} / ${s.gyroYawRate.toFixed(0)} °/s`;
-    const mainAccelG = document.getElementById('mainImuAccels');
-    if (mainAccelG) mainAccelG.textContent = `${s.accelX.toFixed(2)} / ${s.accelY.toFixed(2)} / ${s.accelZ.toFixed(2)} g`;
+    const mainBaroPress = document.getElementById('mainBaroPress');
+    if (mainBaroPress) mainBaroPress.textContent = `${pressHpa.toFixed(1)} hPa`;
+    const mainBaroAlt = document.getElementById('mainBaroAlt');
+    if (mainBaroAlt) mainBaroAlt.textContent = `${altM >= 0 ? '+' : ''}${altM.toFixed(2)} m`;
+    const mainBaroTemp = document.getElementById('mainBaroTemp');
+    if (mainBaroTemp) mainBaroTemp.textContent = `${tempC.toFixed(1)}°C`;
 
-    // 7. Render Active Canvas Views
+    // 6. Render Active Canvas Views
     if (this.currentTab === 'tab-radar' || document.getElementById('mission-modal')?.classList.contains('hide') === false) {
       this.renderFlightRadar('imuRadarCanvas');
     }
@@ -1411,19 +1530,28 @@ class DroneIMULogger {
         ? '<span class="badge-tag" style="background:rgba(16,185,129,0.15);color:#10b981;font-weight:600;">FLYING</span>'
         : '<span class="badge-tag" style="background:rgba(255,255,255,0.05);color:#777;">GROUND</span>';
 
+      const gX = l.gyroX !== undefined ? l.gyroX : (l.gyroRollRate || 0);
+      const gY = l.gyroY !== undefined ? l.gyroY : (l.gyroPitchRate || 0);
+      const gZ = l.gyroZ !== undefined ? l.gyroZ : (l.gyroYawRate || 0);
+      const gMag = l.gyroMagnitude !== undefined ? l.gyroMagnitude : Math.hypot(gX, gY, gZ);
+      const press = l.pressureHpa !== undefined ? l.pressureHpa : this.pressureHpa;
+      const alt = l.baroAltitudeM !== undefined ? l.baroAltitudeM : (l.posZ || 0);
+      const temp = l.temperatureC !== undefined ? l.temperatureC : this.temperatureC;
+      const climb = l.climbRateMs !== undefined ? l.climbRateMs : (l.velZ || 0);
+
       return `
         <tr>
           <td class="mono text-muted">${timeStr}</td>
           <td class="mono font-bold ${isFlying ? 'text-cyan' : ''}">${durationStr}</td>
           <td class="mono">${getEventBadge(l.flightEvent)}</td>
-          <td class="mono text-cyan">${l.posX >= 0 ? '+' : ''}${l.posX.toFixed(2)}m</td>
-          <td class="mono text-green">${l.posY >= 0 ? '+' : ''}${l.posY.toFixed(2)}m</td>
-          <td class="mono text-amber">${l.posZ.toFixed(2)}m</td>
-          <td class="mono">${l.distanceToHome.toFixed(2)}m</td>
-          <td class="mono">${l.rollDeg.toFixed(1)}° / ${l.pitchDeg.toFixed(1)}° / ${l.yawDeg.toFixed(0)}°</td>
-          <td class="mono">${l.gyroRollRate.toFixed(1)} / ${l.gyroPitchRate.toFixed(1)}</td>
-          <td class="mono">${l.accelX.toFixed(2)} / ${l.accelY.toFixed(2)} / ${l.accelZ.toFixed(2)}</td>
-          <td class="mono font-bold text-amber">${l.totalG.toFixed(3)}g</td>
+          <td class="mono text-cyan">${gX >= 0 ? '+' : ''}${gX.toFixed(1)}</td>
+          <td class="mono text-amber">${gY >= 0 ? '+' : ''}${gY.toFixed(1)}</td>
+          <td class="mono" style="color:#c084fc;">${gZ >= 0 ? '+' : ''}${gZ.toFixed(1)}</td>
+          <td class="mono font-bold text-cyan">${gMag.toFixed(1)}</td>
+          <td class="mono text-emerald">${press.toFixed(2)}</td>
+          <td class="mono font-bold text-amber">${alt >= 0 ? '+' : ''}${alt.toFixed(2)}m</td>
+          <td class="mono">${temp.toFixed(1)}°</td>
+          <td class="mono">${climb >= 0 ? '+' : ''}${climb.toFixed(2)}</td>
           <td class="mono text-muted">[${l.rawRoll}, ${l.rawPitch}, ${l.rawThrottle}, ${l.rawYaw}]</td>
           <td class="mono">${statusBadge}</td>
         </tr>
@@ -1484,11 +1612,12 @@ class DroneIMULogger {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const points = this.history.roll.length;
+    const points = this.history.gyroX && this.history.gyroX.length > 0 ? this.history.gyroX.length : this.history.roll.length;
     if (points < 2) return;
 
     // Helper to draw a single channel wave
     const drawChannel = (dataArray, color, scale, offsetY = midY) => {
+      if (!dataArray || dataArray.length === 0) return;
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.8;
       ctx.beginPath();
@@ -1502,21 +1631,25 @@ class DroneIMULogger {
       ctx.stroke();
     };
 
-    // 1. Roll Waveform (Blue) - scale: 1 deg = 1.5px
-    if (this.activeWaveChannels.roll) {
-      drawChannel(this.history.roll, '#0070f3', 1.5, midY);
+    // 1. Gyro ωx (Roll rate, Blue) - scale: 1 deg/s = 0.8px
+    if (this.activeWaveChannels.gyroX) {
+      drawChannel(this.history.gyroX, '#0070f3', 0.8, midY);
     }
-    // 2. Pitch Waveform (Amber) - scale: 1 deg = 1.5px
-    if (this.activeWaveChannels.pitch) {
-      drawChannel(this.history.pitch, '#f59e0b', 1.5, midY);
+    // 2. Gyro ωy (Pitch rate, Amber) - scale: 1 deg/s = 0.8px
+    if (this.activeWaveChannels.gyroY) {
+      drawChannel(this.history.gyroY, '#f59e0b', 0.8, midY);
     }
-    // 3. Accel Z (Emerald) - (Az - 1.0) * 30px
-    if (this.activeWaveChannels.accelZ) {
-      drawChannel(this.history.accelZ.map(v => v - 1.0), '#22c55e', 30.0, midY);
+    // 3. Gyro ωz (Yaw rate, Purple) - scale: 1 deg/s = 0.8px
+    if (this.activeWaveChannels.gyroZ) {
+      drawChannel(this.history.gyroZ, '#a855f7', 0.8, midY);
     }
-    // 4. Gyro Roll Rate (Purple) - scale: 1 deg/s = 0.5px
-    if (this.activeWaveChannels.gyroRoll) {
-      drawChannel(this.history.gyroRoll, '#a855f7', 0.5, midY);
+    // 4. Baro Pressure Deviation (Cyan) - (P - P0) * 15px
+    if (this.activeWaveChannels.pressure) {
+      drawChannel(this.history.pressure.map(p => (p - this.referencePressureHpa)), '#00e5ff', 15.0, midY);
+    }
+    // 5. Baro Altitude (Emerald) - scale: 1m = 30px
+    if (this.activeWaveChannels.altitude) {
+      drawChannel(this.history.altitude, '#22c55e', 30.0, midY);
     }
   }
 

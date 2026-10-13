@@ -502,15 +502,25 @@ def sample_imu_state():
     pitch_deg = -(drone_state.pitch - 128) * 0.25
     yaw_deg = ((drone_state.yaw - 128) * 1.4 + 360) % 360
 
+    # L3GD20H 3-axis gyroscope angular velocities (°/s)
+    # Note: Measures angular velocity around X, Y, and Z axes. Does NOT directly measure orientation or position.
+    gyro_x = round((drone_state.roll - 128) * (28.5 / 127.0) * 3.5, 2)
+    gyro_y = round((drone_state.pitch - 128) * (28.5 / 127.0) * 3.5, 2)
+    gyro_z = round(((drone_state.yaw - 128) / 127.0) * 130.0, 2)
+    gyro_mag = round(math.sqrt(gyro_x**2 + gyro_y**2 + gyro_z**2), 2)
+
+    # BMP180 barometric pressure sensor & relative altitude estimation
+    # Note: Measures atmospheric pressure; estimates altitude relative to reference ground pressure P0.
+    ref_p0 = 1013.25
+    baro_press_hpa = round(ref_p0 * max(0.01, 1.0 - (py_pos_z / 44330.0)) ** 5.255, 2)
+    baro_press_pa = round(baro_press_hpa * 100.0, 1)
+    baro_alt_est = round(44330.0 * (1.0 - (baro_press_hpa / ref_p0) ** (1.0 / 5.255)), 3)
+    temp_c = 24.5
+    climb_vz = round(((drone_state.throttle - 128) / 127.0) * 0.65, 2) if is_airborne else 0.0
+
     roll_rad = math.radians(roll_deg)
     pitch_rad = math.radians(pitch_deg)
     yaw_rad = math.radians(yaw_deg)
-    thrust_load = (drone_state.throttle / 128.0) * 0.85
-
-    accel_x = math.sin(pitch_rad)
-    accel_y = -math.sin(roll_rad) * math.cos(pitch_rad)
-    accel_z = math.cos(roll_rad) * math.cos(pitch_rad) * (0.4 + thrust_load * 0.6 if is_airborne else 1.0)
-    total_g = math.sqrt(accel_x**2 + accel_y**2 + accel_z**2)
 
     # 3D Coordinates Dead-Reckoning (Origin 0,0,0)
     max_linear_speed = 0.35 if drone_state.gear == 1 else (1.10 if drone_state.gear == 3 else 0.65)
@@ -534,6 +544,19 @@ def sample_imu_state():
         "timestamp_epoch_ms": int(now * 1000),
         "total_session_flight_time_s": round(session_flight_seconds, 2),
         "current_flight_time_s": round(current_sortie_seconds, 2),
+        # L3GD20H Gyroscope
+        "gyro_x_dps": gyro_x,
+        "gyro_y_dps": gyro_y,
+        "gyro_z_dps": gyro_z,
+        "gyro_magnitude_dps": gyro_mag,
+        # BMP180 Barometer
+        "baro_pressure_hpa": baro_press_hpa,
+        "baro_pressure_pa": baro_press_pa,
+        "baro_ref_p0_hpa": ref_p0,
+        "baro_altitude_est_m": baro_alt_est,
+        "temperature_c": temp_c,
+        "climb_rate_vz_ms": climb_vz,
+        # 3D coordinates & channels
         "pos_x_east_m": round(py_pos_x, 3),
         "pos_y_north_m": round(py_pos_y, 3),
         "pos_z_alt_m": round(py_pos_z, 3),
@@ -542,10 +565,6 @@ def sample_imu_state():
         "roll_deg": round(roll_deg, 2),
         "pitch_deg": round(pitch_deg, 2),
         "yaw_heading_deg": round(yaw_deg, 1),
-        "accel_x_g": round(accel_x, 3),
-        "accel_y_g": round(accel_y, 3),
-        "accel_z_g": round(accel_z, 3),
-        "total_g_load": round(total_g, 3),
         "estimated_altitude_pct": round((drone_state.throttle / 255) * 100),
         "estimated_altitude_m": round(py_pos_z, 2),
         "raw_roll_channel_1_255": drone_state.roll,
@@ -603,23 +622,26 @@ async def export_imu_csv():
     filename = f"drone_imu_coordinates_flight_log_{now_str}.csv"
 
     headers = [
-        "# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Coordinates Flight Log",
+        "# RC UFO Drone Telemetry Flight Log — L3GD20H Gyroscope & BMP180 Barometer",
         f"# Export Timestamp: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+        f"# Ground Reference Pressure P0: 1013.25 hPa",
         f"# Reference Origin: Home (0.00m, 0.00m, 0.00m)",
         f"# Total Session Flight Time (s): {session_flight_seconds:.2f}",
         f"# Current Sortie Flight Time (s): {current_sortie_seconds:.2f}",
         f"# Total Distance Traveled (m): {py_total_dist:.2f}",
         f"# Total Samples Logged: {len(py_imu_logs)}",
-        "# Hardware IMU: 6-Axis Gyroscope + 3-Axis Accelerometer + Altitude Hold Barometer",
+        "# Sensors Onboard: ST L3GD20H (3-Axis Angular Velocity Gyroscope) & Bosch BMP180 (Atmospheric Pressure & Estimated Rel Altitude)",
+        "# Sensor Notice: L3GD20H measures angular velocity (°/s), not orientation/position. BMP180 measures atmospheric pressure (hPa), altitude is estimated relative to P0.",
         "# ========================================================================="
     ]
 
     columns = [
         "timestamp_iso", "timestamp_epoch_ms", "total_session_flight_time_s", "current_flight_time_s",
+        "gyro_x_dps", "gyro_y_dps", "gyro_z_dps", "gyro_magnitude_dps",
+        "baro_pressure_hpa", "baro_pressure_pa", "baro_ref_p0_hpa", "baro_altitude_est_m",
+        "temperature_c", "climb_rate_vz_ms",
         "pos_x_east_m", "pos_y_north_m", "pos_z_alt_m", "distance_to_home_m", "total_distance_traveled_m",
-        "roll_deg", "pitch_deg", "yaw_heading_deg", "accel_x_g", "accel_y_g", "accel_z_g",
-        "total_g_load", "estimated_altitude_pct", "estimated_altitude_m", "raw_roll_channel_1_255",
-        "raw_pitch_channel_1_255", "raw_throttle_channel_0_255", "raw_yaw_channel_1_255",
+        "raw_roll_channel_1_255", "raw_pitch_channel_1_255", "raw_throttle_channel_0_255", "raw_yaw_channel_1_255",
         "roll_trim", "pitch_trim", "yaw_trim", "speed_gear_pct", "altitude_hold_active",
         "headless_mode_active", "gyro_calibration_active", "stunt_flip_active",
         "protocol_type", "latency_ms", "packets_sent", "packets_received"
