@@ -13,6 +13,7 @@ class MissionRunner {
     this.stepTimer = null;
     this.rampInterval = null;
     this.stepStartTime = 0;
+    this.activeStepLabel = '';
 
     // Flight Calibration
     this.calibration = {
@@ -73,12 +74,24 @@ LAND`
     this.btnPause = document.getElementById('btn-pause-mission');
     this.btnAbort = document.getElementById('btn-abort-mission');
     this.btnSave = document.getElementById('btn-save-mission');
+    this.btnExportMissionCsv = document.getElementById('btn-export-mission-csv');
     this.btnDownloadScript = document.getElementById('btn-download-script');
     this.btnUploadScript = document.getElementById('btn-upload-script');
     this.scriptFileInput = document.getElementById('mission-file-input');
     this.statusPill = document.getElementById('mission-status-pill');
     this.progressStepsContainer = document.getElementById('mission-steps-progress');
     this.logContainer = document.getElementById('mission-log');
+
+    if (this.btnExportMissionCsv) {
+      this.btnExportMissionCsv.addEventListener('click', () => {
+        if (window.droneImu) {
+          window.droneImu.downloadCSV('current');
+          this.log("Exported active flight mission telemetry log (.csv)", "success");
+        } else {
+          this.log("IMU telemetry logger offline", "error");
+        }
+      });
+    }
 
     // Preset dropdown listener
     if (this.presetSelect) {
@@ -232,32 +245,32 @@ LAND`
           break;
         case 'FORWARD':
           const fwdCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, fwdCm / this.calibration.speedCmPerSec);
+          duration = Math.max(1.0, (fwdCm / this.calibration.speedCmPerSec) + 0.3);
           description = `Fly Forward ${fwdCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'BACKWARD':
           const bwdCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, bwdCm / this.calibration.speedCmPerSec);
+          duration = Math.max(1.0, (bwdCm / this.calibration.speedCmPerSec) + 0.3);
           description = `Fly Backward ${bwdCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'LEFT':
           const leftCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, leftCm / this.calibration.speedCmPerSec);
+          duration = Math.max(1.0, (leftCm / this.calibration.speedCmPerSec) + 0.3);
           description = `Move Left ${leftCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'RIGHT':
           const rightCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, rightCm / this.calibration.speedCmPerSec);
+          duration = Math.max(1.0, (rightCm / this.calibration.speedCmPerSec) + 0.3);
           description = `Move Right ${rightCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'UP':
           const upCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, upCm / (this.calibration.speedCmPerSec * 0.8));
+          duration = Math.max(1.0, (upCm / (this.calibration.speedCmPerSec * 0.8)) + 0.3);
           description = `Ascend Altitude +${upCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'DOWN':
           const downCm = parseFloat(arg1) || 50;
-          duration = Math.max(this.calibration.minStepDurationSec, downCm / (this.calibration.speedCmPerSec * 0.8));
+          duration = Math.max(1.0, (downCm / (this.calibration.speedCmPerSec * 0.8)) + 0.3);
           description = `Descend Altitude -${downCm} cm (${duration.toFixed(1)}s)`;
           break;
         case 'YAW':
@@ -329,24 +342,43 @@ LAND`
       return;
     }
 
+    if (this.stepTimer) {
+      clearTimeout(this.stepTimer);
+      this.stepTimer = null;
+    }
+    if (this.rampInterval) {
+      clearInterval(this.rampInterval);
+      this.rampInterval = null;
+    }
+
     this.isRunning = true;
     this.isPaused = false;
     this.currentStepIndex = 0;
+    this.activeStepLabel = '';
     this.updateUIState();
 
-    // Start a fresh, isolated flight sortie in DroneIMULogger for this specific simulation!
-    const presetKey = this.presetSelect ? this.presetSelect.value : '';
-    let missionTitle = 'Custom Simulation';
-    if (this.presets[presetKey]) {
-      const firstLine = this.presets[presetKey].split('\n')[0].replace(/^[#/\s]+/, '').trim();
-      if (firstLine) missionTitle = firstLine;
+    // Determine mission title from script comments or editor
+    let missionTitle = 'Custom Flight Mission';
+    if (this.scriptEditor) {
+      const lines = this.scriptEditor.value.split('\n');
+      for (const l of lines) {
+        const trimmed = l.trim();
+        if (trimmed.startsWith('#') || trimmed.startsWith('//')) {
+          const clean = trimmed.replace(/^[#/\s]+/, '').trim();
+          if (clean) {
+            missionTitle = clean;
+            break;
+          }
+        }
+      }
     }
+
     if (window.droneImu) {
       window.droneImu.startNewSortie(`Simulation: ${missionTitle}`);
+      window.droneImu.isMissionSortie = true;
     }
 
     this.log(`=== STARTING AUTONOMOUS MISSION: ${missionTitle} ===`, "success");
-
     this.executeCurrentStep();
   }
 
@@ -364,17 +396,29 @@ LAND`
     }
 
     const step = this.parsedSteps[this.currentStepIndex];
+    const stepNum = this.currentStepIndex + 1;
+    const totalSteps = this.parsedSteps.length;
+    let stepTag = `STEP_${stepNum}_${step.cmd}`;
+    if (step.arg1) stepTag += `_${step.arg1}`;
+    this.activeStepLabel = stepTag;
+
     this.renderStepsProgress();
     this.updateUIState();
-    this.log(`Step #${this.currentStepIndex + 1}/${this.parsedSteps.length}: ${step.description}`, "info");
+    this.log(`Step #${stepNum}/${totalSteps}: ${step.description}`, "info");
 
     this.applyStepCommand(step);
 
     this.stepStartTime = Date.now();
     const durationMs = step.duration * 1000;
 
+    if (this.stepTimer) {
+      clearTimeout(this.stepTimer);
+      this.stepTimer = null;
+    }
+
     this.stepTimer = setTimeout(() => {
       this.settleNeutral(() => {
+        if (!this.isRunning) return;
         this.currentStepIndex++;
         this.executeCurrentStep();
       });
@@ -389,23 +433,35 @@ LAND`
     if (window.droneDispatchFlightCommand) {
       window.droneDispatchFlightCommand({ action: 'stick', roll: 128, pitch: 128, throttle: 128, yaw: 128 });
     }
+    if (window.droneImu) {
+      window.droneImu.velX = 0;
+      window.droneImu.velY = 0;
+      window.droneImu.groundSpeed = 0;
+    }
     setTimeout(callback, this.calibration.settleDelaySec * 1000);
   }
 
   /**
-   * Smooth Ramping Function: Eases stick deflection in and out for silky smooth flight
+   * Smooth Kinematic Ramping: Controls stick deflection and integrates accurate 3D trajectory
    */
-  smoothRampAxis(axisName, targetVal, totalDurationSec) {
-    if (this.rampInterval) clearInterval(this.rampInterval);
+  smoothRampAxis(axisName, targetVal, totalDurationSec, targetAxis = null, targetDeltaM = 0) {
+    if (this.rampInterval) {
+      clearInterval(this.rampInterval);
+      this.rampInterval = null;
+    }
 
     const startVal = 128;
     const rampTimeMs = 150;
     const startTime = Date.now();
     const totalMs = totalDurationSec * 1000;
 
+    const initialPos = (targetAxis && window.droneImu) ? (window.droneImu[targetAxis] || 0) : 0;
+    let lastDisplacement = 0;
+
     this.rampInterval = setInterval(() => {
       if (!this.isRunning || this.isPaused) {
         clearInterval(this.rampInterval);
+        this.rampInterval = null;
         return;
       }
 
@@ -423,6 +479,34 @@ LAND`
         currentVal = Math.round(startVal + (targetVal - startVal) * factor);
       }
 
+      // Smooth kinematic trajectory propagation
+      if (targetAxis && window.droneImu && targetDeltaM !== 0) {
+        const progress = Math.min(1.0, elapsed / totalMs);
+        const smoothProgress = progress * progress * (3 - 2 * progress); // smoothstep
+        const newPos = initialPos + (targetDeltaM * smoothProgress);
+        const currentDelta = newPos - initialPos;
+        const incrementalDist = Math.abs(currentDelta - lastDisplacement);
+        lastDisplacement = currentDelta;
+
+        if (targetAxis === 'yaw') {
+          window.droneImu.curYawDeg = (initialPos + targetDeltaM * smoothProgress + 360) % 360;
+        } else {
+          window.droneImu[targetAxis] = parseFloat(newPos.toFixed(3));
+          const stepSec = Math.max(0.1, totalMs / 1000);
+          const instSpeed = parseFloat((((targetDeltaM * 6 * progress * (1 - progress)) / stepSec)).toFixed(2));
+          if (targetAxis === 'posZ') {
+            window.droneImu.velZ = instSpeed;
+          } else if (targetAxis === 'posY') {
+            window.droneImu.velY = instSpeed;
+          } else if (targetAxis === 'posX') {
+            window.droneImu.velX = instSpeed;
+          }
+          if (incrementalDist > 0) {
+            window.droneImu.totalDistanceTraveled += incrementalDist;
+          }
+        }
+      }
+
       const stickPayload = {
         action: 'stick',
         roll: axisName === 'roll' ? currentVal : 128,
@@ -438,6 +522,13 @@ LAND`
       if (elapsed >= totalMs) {
         clearInterval(this.rampInterval);
         this.rampInterval = null;
+        if (targetAxis && window.droneImu && targetDeltaM !== 0) {
+          if (targetAxis === 'yaw') {
+            window.droneImu.curYawDeg = (initialPos + targetDeltaM + 360) % 360;
+          } else {
+            window.droneImu[targetAxis] = parseFloat((initialPos + targetDeltaM).toFixed(3));
+          }
+        }
         if (window.droneDispatchFlightCommand) {
           window.droneDispatchFlightCommand({ action: 'stick', roll: 128, pitch: 128, throttle: 128, yaw: 128 });
         }
@@ -447,17 +538,24 @@ LAND`
 
   applyStepCommand(step) {
     const defl = this.calibration.stickDeflection;
+    const stepNum = this.currentStepIndex + 1;
+    let stepTag = `STEP_${stepNum}_${step.cmd}`;
+    if (step.arg1) stepTag += `_${step.arg1}`;
+    this.activeStepLabel = stepTag;
 
-    // Log explicit simulation step to IMU Flight Logger
+    // Log explicit simulation step to IMU Flight Logger immediately
     if (window.droneImu) {
-      window.droneImu.logForcedEvent(`STEP_${step.cmd}`, `${step.cmd} ${step.arg1 || ''}`);
+      window.droneImu.logForcedEvent(stepTag, step.description);
     }
 
     switch (step.cmd) {
       case 'TAKEOFF':
+        this.smoothRampAxis('throttle', 185, this.calibration.takeoffDurationSec, 'posZ', 0.75);
         if (window.droneDispatchFlightCommand) window.droneDispatchFlightCommand({ action: 'takeoff' });
         break;
       case 'LAND':
+        const curZ = window.droneImu ? window.droneImu.posZ : 0.75;
+        this.smoothRampAxis('throttle', 70, this.calibration.landDurationSec, 'posZ', -curZ);
         if (window.droneDispatchFlightCommand) window.droneDispatchFlightCommand({ action: 'land' });
         break;
       case 'HOVER':
@@ -468,28 +566,34 @@ LAND`
         }
         break;
       case 'FORWARD':
-        this.smoothRampAxis('pitch', Math.min(255, 128 + defl), step.duration);
+        const fwdCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('pitch', Math.min(255, 128 + defl), step.duration, 'posY', fwdCm / 100.0);
         break;
       case 'BACKWARD':
-        this.smoothRampAxis('pitch', Math.max(0, 128 - defl), step.duration);
+        const bwdCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('pitch', Math.max(0, 128 - defl), step.duration, 'posY', -(bwdCm / 100.0));
         break;
       case 'LEFT':
-        this.smoothRampAxis('roll', Math.max(0, 128 - defl), step.duration);
+        const leftCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('roll', Math.max(0, 128 - defl), step.duration, 'posX', -(leftCm / 100.0));
         break;
       case 'RIGHT':
-        this.smoothRampAxis('roll', Math.min(255, 128 + defl), step.duration);
+        const rightCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('roll', Math.min(255, 128 + defl), step.duration, 'posX', rightCm / 100.0);
         break;
       case 'UP':
-        this.smoothRampAxis('throttle', Math.min(255, 128 + defl), step.duration);
+        const upCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('throttle', Math.min(255, 128 + defl), step.duration, 'posZ', upCm / 100.0);
         break;
       case 'DOWN':
-        this.smoothRampAxis('throttle', Math.max(0, 128 - defl), step.duration);
+        const downCm = parseFloat(step.arg1) || 50;
+        this.smoothRampAxis('throttle', Math.max(0, 128 - defl), step.duration, 'posZ', -(downCm / 100.0));
         break;
       case 'YAW':
       case 'ROTATE':
         const deg = parseFloat(step.arg1) || 90;
         const targetYaw = deg >= 0 ? Math.min(255, 128 + defl) : Math.max(0, 128 - defl);
-        this.smoothRampAxis('yaw', targetYaw, step.duration);
+        this.smoothRampAxis('yaw', targetYaw, step.duration, 'yaw', deg);
         break;
       case 'FLIP':
         if (window.droneDispatchFlightCommand) window.droneDispatchFlightCommand({ action: 'flip_360' });
@@ -512,8 +616,10 @@ LAND`
 
     this.isRunning = false;
     this.isPaused = false;
-    
+    this.activeStepLabel = '';
+
     if (window.droneImu) {
+      window.droneImu.isMissionSortie = false;
       window.droneImu.logForcedEvent('MISSION_ABORTED', reason);
     }
 
@@ -530,21 +636,33 @@ LAND`
   completeMission() {
     this.isRunning = false;
     this.isPaused = false;
+    this.activeStepLabel = '';
     if (this.rampInterval) {
       clearInterval(this.rampInterval);
       this.rampInterval = null;
     }
-
-    if (window.droneImu) {
-      window.droneImu.logForcedEvent('MISSION_COMPLETED', 'Mission Completed Successfully');
+    if (this.stepTimer) {
+      clearTimeout(this.stepTimer);
+      this.stepTimer = null;
     }
 
     if (window.droneDispatchFlightCommand) {
       window.droneDispatchFlightCommand({ action: 'stick', roll: 128, pitch: 128, throttle: 128, yaw: 128 });
     }
+
+    if (window.droneImu) {
+      window.droneImu.velX = 0;
+      window.droneImu.velY = 0;
+      window.droneImu.velZ = 0;
+      window.droneImu.groundSpeed = 0;
+      window.droneImu.isMissionSortie = false;
+      window.droneImu.logForcedEvent('MISSION_COMPLETED', 'Mission Completed Successfully');
+    }
+
     this.updateUIState();
     this.renderStepsProgress();
     this.log("MISSION COMPLETED SUCCESSFULLY", "success");
+    this.log("Flight log recorded! Click 'Download Flight Log (CSV)' to export.", "info");
   }
 
   updateUIState() {

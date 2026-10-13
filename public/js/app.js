@@ -140,10 +140,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Web Serial Port for ESP32 Bluetooth
   let esp32Port = null;
   let esp32Writer = null;
+  let serialReader = null;
   let isEsp32Connected = false;
   let telemetryWs = null;
   let videoWs = null;
-  let latestDroneBitmap = null;
+  let latestFrameBitmap = null;
+  let fallbackImg = new Image();
+  let currentBlobUrl = null;
+  let lastVideoPacketTime = Date.now();
 
   // ----------------- TERMINAL LOGGING ----------------- //
   function logTerminal(msg, type = 'normal') {
@@ -168,7 +172,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ----------------- ESP32 BLUETOOTH SERIAL BRIDGE ----------------- //
+  let isConnectingSerial = false;
+
+  async function disconnectEsp32() {
+    try {
+      isEsp32Connected = false;
+      state.btConnected = false;
+      if (serialReader) {
+        try { await serialReader.cancel(); } catch (e) {}
+        try { serialReader.releaseLock(); } catch (e) {}
+        serialReader = null;
+      }
+      if (esp32Writer) {
+        try { await esp32Writer.close(); } catch (e) {}
+        esp32Writer = null;
+      }
+      if (esp32Port) {
+        try { await esp32Port.close(); } catch (e) {}
+        esp32Port = null;
+      }
+      if (btnBtStatusPill) {
+        btnBtStatusPill.className = 'pill-badge pill-red';
+      }
+      if (btStatusText) btStatusText.textContent = 'BT DISCONNECTED';
+      if (btnConnectBt) btnConnectBt.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/></svg><span>CONNECT ESP32 (BT)</span>';
+      updateBtUIModal(false, 'Disconnected');
+      logTerminal('ESP32 Disconnected.', 'dim');
+    } catch (e) {
+      logTerminal(`Disconnect note: ${e.message}`, 'dim');
+    }
+  }
+
+  // ----------------- ESP32 BLUETOOTH / USB SERIAL BRIDGE ----------------- //
   async function connectEsp32Bluetooth() {
     if (!('serial' in navigator)) {
       logTerminal('Web Serial API not supported in this browser. Use Chrome, Edge, or Opera.', 'err');
@@ -176,14 +211,36 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // If already connected, clicking toggles disconnect
+    if (isEsp32Connected && esp32Port) {
+      disconnectEsp32();
+      return;
+    }
+
+    // Prevent concurrent open() calls
+    if (isConnectingSerial) {
+      logTerminal('A connection attempt is already in progress. Please wait a moment...', 'warn');
+      return;
+    }
+
+    isConnectingSerial = true;
     try {
       if (esp32Port) {
         try { await esp32Port.close(); } catch (e) {}
       }
 
-      logTerminal('Requesting Bluetooth / Serial COM port...', 'dim');
+      logTerminal('Requesting ESP32 Serial / Bluetooth port...', 'dim');
+      logTerminal('👉 RECOMMENDED: Select "CP210x USB to UART Bridge (COM9)" for instant high-speed USB link!', 'ack');
+      logTerminal('👉 (Or select "Standard Serial (COM11)" if paired over Bluetooth).', 'dim');
       esp32Port = await navigator.serial.requestPort();
-      await esp32Port.open({ baudRate: 115200 });
+      
+      logTerminal('Opening port at 115200 baud...', 'dim');
+      const openPromise = esp32Port.open({ baudRate: 115200 });
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timed out after 5 seconds. If you selected a Bluetooth port, make sure ESP32_Drone is paired, OR select "CP210x USB to UART Bridge (COM9)" to connect instantly over USB cable!')), 5000)
+      );
+      await Promise.race([openPromise, timeoutPromise]);
+
       esp32Writer = esp32Port.writable.getWriter();
       isEsp32Connected = true;
       state.btConnected = true;
@@ -192,56 +249,212 @@ document.addEventListener('DOMContentLoaded', () => {
       if (btnBtStatusPill) {
         btnBtStatusPill.className = 'pill-badge pill-green';
       }
-      if (btStatusText) btStatusText.textContent = 'BT CONNECTED';
-      if (btnConnectBt) btnConnectBt.innerHTML = '<span>ESP32 LINKED</span>';
+      if (btStatusText) btStatusText.textContent = 'ESP32 CONNECTED';
+      if (btnConnectBt) btnConnectBt.innerHTML = '<span>DISCONNECT ESP32</span>';
 
-      logTerminal('ESP32_Drone Connected via Bluetooth SPP (115200 Baud)', 'ack');
-      updateBtUIModal(true, 'ESP32_Drone Connected (115200 Baud)');
+      logTerminal('✅ ESP32 Connected successfully! (115200 Baud)', 'ack');
+      updateBtUIModal(true, 'ESP32 Connected (115200 Baud)');
       readEsp32SerialStream(esp32Port);
 
       // Send initial status ping
       sendEsp32Command('P\n');
     } catch (err) {
-      console.warn('Bluetooth serial error:', err);
+      console.warn('ESP32 serial error:', err);
       if (err.name !== 'NotFoundError') {
         logTerminal(`Connection failed: ${err.message}`, 'err');
+        if (err.message && (err.message.includes('Failed to open') || err.message.includes('Access denied'))) {
+          logTerminal('💡 Check 1: Close Arduino IDE Serial Monitor (it locks COM9 exclusively).', 'warn');
+          logTerminal('💡 Check 2: Select "CP210x USB to UART Bridge (COM9)" in the popup instead of Bluetooth.', 'warn');
+          logTerminal('💡 Check 3: Press EN/RST button on ESP32 board to reset connection.', 'warn');
+        }
         updateBtUIModal(false, `Error: ${err.message}`);
       }
+    } finally {
+      isConnectingSerial = false;
     }
   }
 
   async function readEsp32SerialStream(port) {
-    const textDecoder = new TextDecoderStream();
-    port.readable.pipeTo(textDecoder.writable).catch(() => {});
-    const reader = textDecoder.readable.getReader();
+    if (!port || !port.readable) return;
+    try {
+      serialReader = port.readable.getReader();
+    } catch (e) {
+      logTerminal(`Error acquiring serial reader: ${e.message}`, 'err');
+      return;
+    }
+
+    let rxBuffer = new Uint8Array(0);
+    const textDecoder = new TextDecoder('utf-8');
+
+    function appendChunk(buf1, buf2) {
+      const merged = new Uint8Array(buf1.length + buf2.length);
+      merged.set(buf1, 0);
+      merged.set(buf2, buf1.length);
+      return merged;
+    }
+
+    function processTextString(str) {
+      const lines = str.split('\n');
+      for (const l of lines) {
+        const trimmed = l.trim();
+        if (trimmed) {
+          if (trimmed.startsWith('ACK:')) logTerminal(trimmed, 'ack');
+          else if (trimmed.startsWith('STATUS:')) logTerminal(trimmed, 'out');
+          else if (trimmed.startsWith('[VIDEO]') || trimmed.startsWith('[WIFI]') || trimmed.startsWith('[BT]')) logTerminal(trimmed, 'ack');
+          else if (trimmed.includes('FAIL') || trimmed.includes('Error')) logTerminal(trimmed, 'err');
+          else logTerminal(trimmed, 'out');
+        }
+      }
+    }
 
     try {
-      while (isEsp32Connected) {
-        const { value, done } = await reader.read();
+      while (isEsp32Connected && serialReader) {
+        const { value, done } = await serialReader.read();
         if (done) break;
-        if (value) {
-          const lines = value.split('\n');
-          lines.forEach((l) => {
-            const trimmed = l.trim();
-            if (trimmed) {
-              if (trimmed.startsWith('ACK:')) logTerminal(trimmed, 'ack');
-              else if (trimmed.startsWith('STATUS:')) logTerminal(trimmed, 'out');
-              else if (trimmed.includes('FAIL') || trimmed.includes('Error')) logTerminal(trimmed, 'err');
-              else logTerminal(trimmed, 'out');
+        if (!value || value.length === 0) continue;
+
+        rxBuffer = appendChunk(rxBuffer, value);
+
+        // State machine to parse both binary video frames and ASCII text lines
+        while (rxBuffer.length > 0) {
+          // Look for 4-byte magic sync header: 0xDE, 0xAD, 0xBE, 0xEF
+          let magicIdx = -1;
+          for (let i = 0; i <= rxBuffer.length - 4; i++) {
+            if (rxBuffer[i] === 0xDE && rxBuffer[i+1] === 0xAD && rxBuffer[i+2] === 0xBE && rxBuffer[i+3] === 0xEF) {
+              magicIdx = i;
+              break;
             }
-          });
+          }
+
+          if (magicIdx === -1) {
+            // No magic header found. Check if there are any newline characters
+            const lastNl = rxBuffer.lastIndexOf(10); // '\n' = 10
+            if (lastNl !== -1) {
+              const textBytes = rxBuffer.subarray(0, lastNl + 1);
+              rxBuffer = rxBuffer.subarray(lastNl + 1);
+              processTextString(textDecoder.decode(textBytes));
+            } else if (rxBuffer.length > 4096) {
+              // Safety flush
+              rxBuffer = new Uint8Array(0);
+            }
+            break; // Await more incoming data
+          }
+
+          // If magic header is found at index > 0, the bytes before it are text
+          if (magicIdx > 0) {
+            const textBytes = rxBuffer.subarray(0, magicIdx);
+            rxBuffer = rxBuffer.subarray(magicIdx);
+            processTextString(textDecoder.decode(textBytes));
+          }
+
+          // Magic header is now at index 0. Need at least 8 bytes for magic + length
+          if (rxBuffer.length < 8) {
+            break; // Await more data
+          }
+
+          const frameLen = ((rxBuffer[4] << 24) >>> 0) | (rxBuffer[5] << 16) | (rxBuffer[6] << 8) | rxBuffer[7];
+
+          // Sanity check frame length (typical JPEG is 200 bytes .. 64KB)
+          if (frameLen <= 0 || frameLen > 100000) {
+            // Corrupted / desynced length: discard leading byte and re-scan
+            rxBuffer = rxBuffer.subarray(1);
+            continue;
+          }
+
+          // Check if full JPEG payload is present
+          if (rxBuffer.length < 8 + frameLen) {
+            break; // Await rest of JPEG bytes
+          }
+
+          // Complete frame available!
+          const jpegBytes = rxBuffer.slice(8, 8 + frameLen);
+          rxBuffer = rxBuffer.subarray(8 + frameLen);
+
+          // Render live frame
+          await renderBtVideoFrame(jpegBytes);
         }
       }
     } catch (e) {
-      logTerminal(`Serial read stream closed: ${e.message}`, 'warn');
+      logTerminal(`Serial read stream note: ${e.message}`, 'warn');
     } finally {
-      reader.releaseLock();
+      if (serialReader) {
+        try { serialReader.releaseLock(); } catch (err) {}
+        serialReader = null;
+      }
     }
   }
 
-  async function sendEsp32Command(data) {
-    if (!esp32Writer || !isEsp32Connected) return;
+  async function renderBtVideoFrame(jpegBytes) {
+    if (!jpegBytes || jpegBytes.length < 100) return;
     try {
+      const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
+      if (window.createImageBitmap) {
+        try {
+          const bmp = await createImageBitmap(blob);
+          if (latestFrameBitmap && latestFrameBitmap.close) {
+            latestFrameBitmap.close();
+          }
+          latestFrameBitmap = bmp;
+          lastVideoPacketTime = Date.now();
+          state.hasLiveVideo = true;
+          if (standbyOverlay && !standbyOverlay.classList.contains('hide')) {
+            standbyOverlay.classList.add('hide');
+          }
+          drawVideoFrame();
+        } catch (e) {
+          loadFallbackImage(blob);
+        }
+      } else {
+        loadFallbackImage(blob);
+      }
+
+      // Also forward frame to Node.js backend so disk saving, auto-capture & snapshot APIs work
+      if (videoWs && videoWs.readyState === WebSocket.OPEN && videoWs.bufferedAmount < 65536) {
+        videoWs.send(jpegBytes);
+      }
+    } catch (err) {
+      console.warn('renderBtVideoFrame error:', err);
+    }
+  }
+
+  function loadFallbackImage(blob) {
+    try {
+      const oldUrl = currentBlobUrl;
+      currentBlobUrl = URL.createObjectURL(blob);
+      fallbackImg.onload = () => {
+        lastVideoPacketTime = Date.now();
+        state.hasLiveVideo = true;
+        if (standbyOverlay && !standbyOverlay.classList.contains('hide')) {
+          standbyOverlay.classList.add('hide');
+        }
+        drawVideoFrame();
+        if (oldUrl) URL.revokeObjectURL(oldUrl);
+      };
+      fallbackImg.src = currentBlobUrl;
+    } catch (e) {}
+  }
+
+  let isSendingSerial = false;
+  let lastSendErrorLogged = 0;
+
+  async function sendEsp32Command(data, priority = false) {
+    if (!esp32Writer || !isEsp32Connected) return;
+
+    if (isSendingSerial) {
+      if (!priority) return; // Drop high-frequency stick packets if writer is busy
+      let waitCount = 0;
+      while (isSendingSerial && waitCount < 8) {
+        await new Promise(r => setTimeout(r, 20));
+        waitCount++;
+      }
+      if (isSendingSerial) return;
+    }
+
+    isSendingSerial = true;
+    try {
+      if (esp32Writer.ready) {
+        await esp32Writer.ready;
+      }
       if (typeof data === 'string') {
         const encoder = new TextEncoder();
         await esp32Writer.write(encoder.encode(data));
@@ -249,7 +462,32 @@ document.addEventListener('DOMContentLoaded', () => {
         await esp32Writer.write(data);
       }
     } catch (e) {
-      logTerminal(`Send Error: ${e.message}`, 'err');
+      const now = Date.now();
+      // Throttle error notifications so terminal doesn't get flooded
+      if (now - lastSendErrorLogged > 3500) {
+        lastSendErrorLogged = now;
+        logTerminal(`Send Error: ${e.message}`, 'err');
+      }
+
+      // Automatically recover from errored stream writer
+      try {
+        if (esp32Writer) {
+          esp32Writer.releaseLock();
+          esp32Writer = null;
+        }
+      } catch (err) {}
+
+      if (esp32Port && esp32Port.writable) {
+        try {
+          esp32Writer = esp32Port.writable.getWriter();
+        } catch (err) {
+          disconnectEsp32();
+        }
+      } else {
+        disconnectEsp32();
+      }
+    } finally {
+      isSendingSerial = false;
     }
   }
 
@@ -285,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ----------------- WEBSOCKET BACKEND RELAY & AUTO-RECONNECT ----------------- //
   let telemetryReconnectTimer = null;
   let videoReconnectTimer = null;
-  let lastVideoPacketTime = Date.now();
+  lastVideoPacketTime = Date.now();
 
   function initSockets() {
     const loc = window.location;
@@ -347,10 +585,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    let latestFrameBitmap = null;
-    let fallbackImg = new Image();
-    let currentBlobUrl = null;
-
     function connectVideo() {
       clearTimeout(videoReconnectTimer);
       try {
@@ -360,7 +594,7 @@ document.addEventListener('DOMContentLoaded', () => {
           logTerminal('Live Video WebSocket linked', 'dim');
         };
         videoWs.onmessage = async (event) => {
-          if (activeVideoSource === 'webcam') return;
+          if (activeVideoSource === 'webcam' || activeVideoSource === 'drone_bluetooth') return;
 
           if (window.createImageBitmap) {
             try {
@@ -375,8 +609,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 standbyOverlay.classList.add('hide');
               }
               drawVideoFrame();
+              return;
             } catch (err) {}
-          } else {
+          }
+
+          // Fallback to Image element
+          try {
             const oldUrl = currentBlobUrl;
             currentBlobUrl = URL.createObjectURL(event.data);
             fallbackImg.onload = () => {
@@ -389,7 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
               if (oldUrl) URL.revokeObjectURL(oldUrl);
             };
             fallbackImg.src = currentBlobUrl;
-          }
+          } catch (e) {}
         };
         videoWs.onclose = () => {
           videoReconnectTimer = setTimeout(connectVideo, 1200);
@@ -408,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ----------------- VIDEO FEED & ROTATION ENGINE ----------------- //
   let videoRotation = parseInt(localStorage.getItem('drone_video_rotation') || '0', 10) || 0;
-  let activeVideoSource = localStorage.getItem('drone_video_source') || 'drone_rtsp';
+  let activeVideoSource = localStorage.getItem('drone_video_source') || 'drone_bluetooth';
   let webcamStream = null;
   let webcamVideoElement = null;
   let webcamAnimFrame = null;
@@ -419,50 +657,105 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!videoCanvas) return;
     fpvTick += 0.016;
 
-    const hasLiveStream = latestFrameBitmap && (Date.now() - lastVideoPacketTime < 2500);
-    const isWebcam = (activeVideoSource === 'webcam' && webcamVideoElement && webcamVideoElement.readyState >= 2);
+    try {
+      const hasLiveStream = latestFrameBitmap && (Date.now() - lastVideoPacketTime < 2500);
+      const isWebcam = (activeVideoSource === 'webcam' && webcamVideoElement && webcamVideoElement.readyState >= 2);
 
-    // If activeVideoSource is synthetic OR no live camera frames arriving, render high-fidelity synthetic FPV HUD
-    if (activeVideoSource === 'synthetic' || (!hasLiveStream && !isWebcam)) {
-      if (videoCanvas.width !== 640 || videoCanvas.height !== 360) {
-        videoCanvas.width = 640;
-        videoCanvas.height = 360;
+      // If activeVideoSource is drone_bluetooth and no live frames arriving yet, render clean standby screen
+      if (activeVideoSource === 'drone_bluetooth' && !hasLiveStream) {
+        if (videoCanvas.width !== 640 || videoCanvas.height !== 360) {
+          videoCanvas.width = 640;
+          videoCanvas.height = 360;
+        }
+        const ctx = videoCanvas.getContext('2d');
+        ctx.fillStyle = '#080c14';
+        ctx.fillRect(0, 0, 640, 360);
+
+        // Tech grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+        ctx.lineWidth = 1;
+        for (let x = 40; x < 640; x += 40) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 360); ctx.stroke();
+        }
+        for (let y = 30; y < 360; y += 30) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(640, y); ctx.stroke();
+        }
+
+        // Reticle
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(320, 150, 26, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.font = '600 13px Inter, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('ESP32 BLUETOOTH FPV — STANDBY', 320, 195);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.font = '11.5px Inter, sans-serif';
+        ctx.fillText('Awaiting Drone Wi-Fi Connection...', 320, 220);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.font = '10.5px Inter, sans-serif';
+        ctx.fillText('Power ON your drone, or type SSID:<name> in terminal', 320, 240);
+        return;
       }
-      DroneHUD.renderSyntheticFPV(videoCanvas, state, window.droneImu?.currentIMU, fpvTick);
-      return;
+
+      // If activeVideoSource is synthetic OR no live camera frames arriving, render high-fidelity synthetic FPV HUD
+      if (activeVideoSource === 'synthetic' || (!hasLiveStream && !isWebcam)) {
+        if (videoCanvas.width !== 640 || videoCanvas.height !== 360) {
+          videoCanvas.width = 640;
+          videoCanvas.height = 360;
+        }
+        DroneHUD.renderSyntheticFPV(videoCanvas, state, window.droneImu?.currentIMU, fpvTick);
+        return;
+      }
+
+      const ctx = videoCanvas.getContext('2d');
+      const source = isWebcam ? webcamVideoElement : (latestFrameBitmap || fallbackImg);
+      if (!source) {
+        DroneHUD.renderSyntheticFPV(videoCanvas, state, window.droneImu?.currentIMU, fpvTick);
+        return;
+      }
+
+      const rawW = source.videoWidth || source.naturalWidth || source.width || 1280;
+      const rawH = source.videoHeight || source.naturalHeight || source.height || 720;
+      if (rawW <= 0 || rawH <= 0) {
+        DroneHUD.renderSyntheticFPV(videoCanvas, state, window.droneImu?.currentIMU, fpvTick);
+        return;
+      }
+
+      const isRotated90 = (videoRotation === 90 || videoRotation === 270);
+      const canvasW = isRotated90 ? rawH : rawW;
+      const canvasH = isRotated90 ? rawW : rawH;
+
+      if (videoCanvas.width !== canvasW || videoCanvas.height !== canvasH) {
+        videoCanvas.width = canvasW;
+        videoCanvas.height = canvasH;
+      }
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'medium';
+
+      if (videoRotation === 0) {
+        ctx.drawImage(source, 0, 0, canvasW, canvasH);
+      } else {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        ctx.translate(canvasW / 2, canvasH / 2);
+        ctx.rotate((videoRotation * Math.PI) / 180);
+        ctx.drawImage(source, -rawW / 2, -rawH / 2, rawW, rawH);
+      }
+      ctx.restore();
+    } catch (err) {
+      console.warn('drawVideoFrame error:', err);
+      try {
+        DroneHUD.renderSyntheticFPV(videoCanvas, state, window.droneImu?.currentIMU, fpvTick);
+      } catch (e) {}
     }
-
-    const ctx = videoCanvas.getContext('2d');
-    const source = isWebcam ? webcamVideoElement : (latestFrameBitmap || fallbackImg);
-    if (!source) return;
-
-    const rawW = source.videoWidth || source.naturalWidth || source.width || 1280;
-    const rawH = source.videoHeight || source.naturalHeight || source.height || 720;
-    if (rawW <= 0 || rawH <= 0) return;
-
-    const isRotated90 = (videoRotation === 90 || videoRotation === 270);
-    const canvasW = isRotated90 ? rawH : rawW;
-    const canvasH = isRotated90 ? rawW : rawH;
-
-    if (videoCanvas.width !== canvasW || videoCanvas.height !== canvasH) {
-      videoCanvas.width = canvasW;
-      videoCanvas.height = canvasH;
-    }
-
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'medium';
-
-    if (videoRotation === 0) {
-      ctx.drawImage(source, 0, 0, canvasW, canvasH);
-    } else {
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, canvasW, canvasH);
-      ctx.translate(canvasW / 2, canvasH / 2);
-      ctx.rotate((videoRotation * Math.PI) / 180);
-      ctx.drawImage(source, -rawW / 2, -rawH / 2, rawW, rawH);
-    }
-    ctx.restore();
   }
 
   // Continuous 60 FPS Video & Synthetic HUD Render Loop
@@ -536,10 +829,15 @@ document.addEventListener('DOMContentLoaded', () => {
     stopWebcamFeed();
 
     let targetUrl = '';
-    if (sourceKey === 'drone_rtsp') {
+    if (sourceKey === 'drone_bluetooth') {
+      targetUrl = 'bluetooth://ESP32_Drone';
+      if (standbyStreamUrl) standbyStreamUrl.textContent = 'Active Feed: ESP32 FPV Video Stream (USB COM9 / Bluetooth)';
+    } else if (sourceKey === 'drone_rtsp') {
       targetUrl = 'rtsp://192.168.1.1:7070/webcam';
+      if (standbyStreamUrl) standbyStreamUrl.textContent = 'Active Feed: Direct Drone RTSP (Requires Laptop on Drone Wi-Fi)';
     } else if (sourceKey === 'drone_http') {
-      targetUrl = 'http://192.168.4.1:8080/?action=stream';
+      targetUrl = 'http://192.168.1.1:8080/?action=stream';
+      if (standbyStreamUrl) standbyStreamUrl.textContent = 'Active Feed: Drone HTTP MJPEG (Port 8080)';
     } else if (sourceKey === 'synthetic') {
       targetUrl = 'synthetic';
     } else if (sourceKey === 'custom') {
@@ -566,6 +864,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initSockets();
 
   // ----------------- UNIFIED FLIGHT COMMAND DISPATCHER ----------------- //
+  let lastBtStickTime = 0;
+  let lastBtRoll = 128, lastBtPitch = 128, lastBtThrottle = 128, lastBtYaw = 128;
+
   function dispatchFlightCommand(payload) {
     if (!payload) return;
 
@@ -594,29 +895,40 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. Send via Bluetooth Serial to ESP32 Bridge
     if (isEsp32Connected && esp32Writer) {
       if (payload.action === 'takeoff') {
-        sendEsp32Command('T\n');
+        sendEsp32Command('T\n', true);
         logTerminal('TX > TAKEOFF [T]', 'ack');
       } else if (payload.action === 'land') {
-        sendEsp32Command('L\n');
+        sendEsp32Command('L\n', true);
         logTerminal('TX > LAND [L]', 'ack');
       } else if (payload.action === 'emergency_stop') {
-        sendEsp32Command('S\n');
+        sendEsp32Command('S\n', true);
         logTerminal('TX > EMERGENCY STOP [S]', 'err');
       } else if (payload.action === 'calibrate_gyro') {
-        sendEsp32Command('G\n');
+        sendEsp32Command('G\n', true);
         logTerminal('TX > GYRO CALIBRATION [G]', 'ack');
       } else if (payload.action === 'handshake') {
-        sendEsp32Command('H\n');
+        sendEsp32Command('H\n', true);
         logTerminal('TX > HANDSHAKE [H]', 'out');
       } else if (payload.action === 'stick') {
-        // Standard E88 8-Byte Packet: [0x66, roll, pitch, throttle, yaw, cmd, checksum, 0x99]
         const r = payload.roll !== undefined ? payload.roll : 128;
         const p = payload.pitch !== undefined ? payload.pitch : 128;
         const t = payload.throttle !== undefined ? payload.throttle : 128;
         const y = payload.yaw !== undefined ? payload.yaw : 128;
-        const cs = (r ^ p ^ t ^ y) & 0xFF;
-        const pkt = new Uint8Array([0x66, r, p, t, y, 0x00, cs, 0x99]);
-        sendEsp32Command(pkt);
+
+        const now = Date.now();
+        const stickChanged = (r !== lastBtRoll || p !== lastBtPitch || t !== lastBtThrottle || y !== lastBtYaw);
+        
+        // Rate-limit stick frames over Bluetooth: send when sticks change, or 5 Hz heartbeat
+        if (stickChanged || (now - lastBtStickTime >= 200)) {
+          lastBtStickTime = now;
+          lastBtRoll = r;
+          lastBtPitch = p;
+          lastBtThrottle = t;
+          lastBtYaw = y;
+          const cs = (r ^ p ^ t ^ y) & 0xFF;
+          const pkt = new Uint8Array([0x66, r, p, t, y, 0x00, cs, 0x99]);
+          sendEsp32Command(pkt, false);
+        }
       }
     }
 

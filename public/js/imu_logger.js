@@ -381,11 +381,11 @@ class DroneIMULogger {
       this.airborneStartTime = Date.now();
       this.currentSortieFlightTime = 0.0;
 
-      // If a previous flight in this session already landed, start a fresh new sortie
+      // If a previous flight in this session already landed, start a fresh new sortie (unless mission is already managing sortie)
       const hasPreviousLandedFlight = this.currentSortieLogs && this.currentSortieLogs.some(s => s.flightEvent === 'LANDED');
-      if (hasPreviousLandedFlight) {
+      if (hasPreviousLandedFlight && !this.isMissionSortie) {
         this.startNewSortie(`Flight Sortie #${this.sortieCount + 1}`);
-      } else {
+      } else if (!this.isMissionSortie) {
         this.resetCoordinates(0, 0, 0);
       }
 
@@ -433,42 +433,65 @@ class DroneIMULogger {
       return true;
     }
 
-    // Rate limit: strictly 2 samples per second (500ms minimum interval)
-    if (now - this.lastLogTimestamp < 500) return false;
+    const isMission = (window.missionRunner && window.missionRunner.isRunning) || this.isMissionSortie;
+    const minInterval = isMission ? 140 : 500; // 7 Hz during autonomous missions, 2 Hz during manual flight
 
-    // 2. Hardware / Mode Triggers
-    if (sample.gyroCalibrating && !prev.gyroCalibrating) {
+    // Rate limit
+    if (now - this.lastLogTimestamp < minInterval) return false;
+
+    // 2. Autonomous Mission Active Step Tracking
+    if (isMission && window.missionRunner?.activeStepLabel) {
+      const activeStep = window.missionRunner.activeStepLabel;
+      const isManeuverActive = (Math.abs(sample.rawPitch - 128) >= 4) ||
+                               (Math.abs(sample.rawRoll - 128) >= 4) ||
+                               (Math.abs(sample.rawThrottle - 128) >= 8) ||
+                               (Math.abs(sample.rawYaw - 128) >= 8) ||
+                               (Math.abs(sample.velX) > 0.02) ||
+                               (Math.abs(sample.velY) > 0.02) ||
+                               (Math.abs(sample.velZ) > 0.02) ||
+                               (Math.abs(sample.posY - prev.posY) >= 0.02) ||
+                               (Math.abs(sample.posX - prev.posX) >= 0.02) ||
+                               (Math.abs(sample.posZ - prev.posZ) >= 0.02);
+      if (isManeuverActive) {
+        eventName = activeStep;
+      }
+    }
+
+    // 3. Hardware / Mode Triggers
+    if (!eventName && sample.gyroCalibrating && !prev.gyroCalibrating) {
       eventName = 'GYRO_CALIBRATE';
-    } else if (sample.stuntFlipping && !prev.stuntFlipping) {
+    } else if (!eventName && sample.stuntFlipping && !prev.stuntFlipping) {
       eventName = 'STUNT_FLIP';
-    } else if (sample.gearPct !== prev.gearPct) {
+    } else if (!eventName && sample.gearPct !== prev.gearPct) {
       eventName = `GEAR_${sample.gearPct}%`;
     }
-    // 3. Significant Stick Channel Movement (delta >= 3 out of 255)
-    else if (Math.abs(sample.rawRoll - prev.rawRoll) >= 3 ||
+    // 4. Significant Stick Channel Movement (delta >= 3 out of 255)
+    else if (!eventName && (Math.abs(sample.rawRoll - prev.rawRoll) >= 3 ||
              Math.abs(sample.rawPitch - prev.rawPitch) >= 3 ||
              Math.abs(sample.rawThrottle - prev.rawThrottle) >= 3 ||
-             Math.abs(sample.rawYaw - prev.rawYaw) >= 3) {
-      eventName = 'STICK_INPUT';
+             Math.abs(sample.rawYaw - prev.rawYaw) >= 3)) {
+      eventName = isMission && window.missionRunner?.activeStepLabel ? window.missionRunner.activeStepLabel : 'STICK_INPUT';
     }
-    // 4. Significant Attitude Tilt Change (delta >= 0.7 deg)
-    else if (Math.abs(sample.rollDeg - prev.rollDeg) >= 0.7 ||
+    // 5. Significant Attitude Tilt Change (delta >= 0.7 deg)
+    else if (!eventName && (Math.abs(sample.rollDeg - prev.rollDeg) >= 0.7 ||
              Math.abs(sample.pitchDeg - prev.pitchDeg) >= 0.7 ||
-             Math.abs(sample.yawDeg - prev.yawDeg) >= 1.5) {
+             Math.abs(sample.yawDeg - prev.yawDeg) >= 1.5)) {
       eventName = 'ATTITUDE_CHANGE';
     }
-    // 5. Significant 3D Position Displacement (delta >= 4 cm)
-    else if (Math.abs(sample.posX - prev.posX) >= 0.04 ||
-             Math.abs(sample.posY - prev.posY) >= 0.04 ||
-             Math.abs(sample.posZ - prev.posZ) >= 0.04) {
-      eventName = 'POSITION_UPDATE';
+    // 6. Significant 3D Position Displacement (delta >= 3 cm)
+    else if (!eventName && (Math.abs(sample.posX - prev.posX) >= 0.03 ||
+             Math.abs(sample.posY - prev.posY) >= 0.03 ||
+             Math.abs(sample.posZ - prev.posZ) >= 0.03)) {
+      eventName = isMission && window.missionRunner?.activeStepLabel ? window.missionRunner.activeStepLabel : 'POSITION_UPDATE';
     }
-    // 6. Airborne Continuous 2Hz Telemetry Stream (every 500ms during flight)
-    else if (this.isAirborne && (now - this.lastLogTimestamp >= 500)) {
-      eventName = this.groundSpeed > 0.05 ? 'CRUISE' : 'HOVER';
+    // 7. Airborne Continuous Telemetry Stream (every 500ms or 140ms during flight)
+    else if (!eventName && this.isAirborne && (now - this.lastLogTimestamp >= minInterval)) {
+      eventName = isMission && window.missionRunner?.activeStepLabel 
+        ? window.missionRunner.activeStepLabel 
+        : (this.groundSpeed > 0.05 ? 'CRUISE' : 'HOVER');
     }
-    // 7. Periodic Idle Heartbeat (every 10s when stationary on ground)
-    else if (!this.isAirborne && (now - this.lastLogTimestamp >= 10000)) {
+    // 8. Periodic Idle Heartbeat (every 10s when stationary on ground)
+    else if (!eventName && !this.isAirborne && (now - this.lastLogTimestamp >= 10000)) {
       eventName = 'IDLE_HEARTBEAT';
     }
 
@@ -728,8 +751,8 @@ class DroneIMULogger {
         this.totalDistanceTraveled += Math.sqrt(this.velX * this.velX + this.velY * this.velY + this.velZ * this.velZ) * dt;
       }
 
-      // Distance from Home (0,0,0)
-      this.distanceToHome = parseFloat(Math.sqrt(this.posX * this.posX + this.posY * this.posY + this.posZ * this.posZ).toFixed(2));
+      // 2D Horizontal Ground Distance from Home (0,0)
+      this.distanceToHome = parseFloat(Math.hypot(this.posX, this.posY).toFixed(2));
 
       // Add breadcrumb point to radar trail (throttled every 50ms)
       const lastPt = this.pathTrail[this.pathTrail.length - 1];
@@ -752,7 +775,7 @@ class DroneIMULogger {
       this.velZ = 0.0;
       this.groundSpeed = 0.0;
       this.posZ = 0.0;
-      this.distanceToHome = parseFloat(Math.sqrt(this.posX * this.posX + this.posY * this.posY).toFixed(2));
+      this.distanceToHome = parseFloat(Math.hypot(this.posX, this.posY).toFixed(2));
     }
 
     // Store previous
@@ -999,9 +1022,26 @@ class DroneIMULogger {
    */
   exportCSV(mode = 'current') {
     const isCurrent = mode === 'current';
-    const targetArray = isCurrent 
+    let targetArray = isCurrent 
       ? (this.currentSortieLogs && this.currentSortieLogs.length > 0 ? this.currentSortieLogs : [])
       : (this.allSessionLogs && this.allSessionLogs.length > 0 ? this.allSessionLogs : []);
+
+    let sortieName = this.currentSortieName;
+    let sortieNumber = this.sortieCount;
+    let sortieDuration = this.currentSortieFlightTime;
+    let sortieDistance = this.totalDistanceTraveled;
+
+    // If active sortie is empty/idle and a previous sortie completed, fall back to that completed sortie!
+    if (isCurrent && targetArray.length <= 1 && this.sessionSorties.length > 0) {
+      const latestSortie = this.sessionSorties[this.sessionSorties.length - 1];
+      if (latestSortie.samples && latestSortie.samples.length > 0) {
+        targetArray = latestSortie.samples;
+        sortieName = latestSortie.sortieName || sortieName;
+        sortieNumber = latestSortie.sortieNumber || sortieNumber;
+        sortieDuration = latestSortie.duration || sortieDuration;
+        sortieDistance = latestSortie.distance || sortieDistance;
+      }
+    }
 
     if (targetArray.length === 0) {
       console.error('[ERROR] IMU telemetry offline / no flight samples recorded for export');
@@ -1014,14 +1054,14 @@ class DroneIMULogger {
     const now = new Date();
     const headers = [
       `# RC UFO Drone Ground Control Station — 6-DOF IMU & 3D Telemetry Flight Log`,
-      `# Flight Sortie: ${isCurrent ? `${this.currentSortieName} (Sortie #${this.sortieCount})` : `Complete Session (Total Sorties: ${this.sortieCount})`}`,
+      `# Flight Sortie: ${isCurrent ? `${sortieName} (Sortie #${sortieNumber})` : `Complete Session (Total Sorties: ${this.sortieCount})`}`,
       `# Export Scope: ${isCurrent ? 'Single Flight Simulation (Active Sortie Isolated)' : 'Complete Session (All Recorded Sorties)'}`,
       `# Export Timestamp: ${now.toISOString()}`,
       `# Reference Origin: Home (0.00m, 0.00m, 0.00m)`,
-      `# Current Sortie Flight Time (s): ${this.currentSortieFlightTime.toFixed(2)} (${this.formatDuration(this.currentSortieFlightTime)})`,
+      `# Current Sortie Flight Time (s): ${sortieDuration.toFixed(2)} (${this.formatDuration(sortieDuration)})`,
       `# Total Session Flight Time (s): ${this.totalSessionFlightTime.toFixed(2)} (${this.formatDurationLong(this.totalSessionFlightTime)})`,
-      `# Total Distance Traveled (m): ${this.totalDistanceTraveled.toFixed(2)} m`,
-      `# Total Samples Logged (Event & 2Hz Rate): ${samples.length}`,
+      `# Total Distance Traveled (m): ${sortieDistance.toFixed(2)} m`,
+      `# Total Samples Logged (Event & Rate): ${samples.length}`,
       `# Sensor Hardware: 6-Axis IMU (Gyro + Accel) + Barometric Optical Flow`,
       `# Missing Data Policy: Strict (Outputs NaN, No Hardcoded Mock Substitutions)`,
       `# =========================================================================`

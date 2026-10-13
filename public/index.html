@@ -57,9 +57,9 @@
           <span>ESP32 Setup</span>
         </button>
 
-        <button id="btnConnectBt" class="btn-cyan-glow" title="Connect to ESP32 over Bluetooth SPP">
+        <button id="btnConnectBt" class="btn-cyan-glow" title="Connect to ESP32 over USB Serial or Bluetooth SPP">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/></svg>
-          <span>CONNECT ESP32 (BT)</span>
+          <span>CONNECT ESP32 (USB / BT)</span>
         </button>
 
         <button id="btnImuStudio" class="btn-slate btn-highlight" title="6-DOF IMU Telemetry &amp; Flight Logs [I]">
@@ -246,8 +246,9 @@
 
               <!-- Camera Feed Selector -->
               <select id="selectCameraFeed" class="select-camera-feed" title="Change camera feed source">
-                <option value="drone_rtsp">📡 Drone RTSP (Port 7070)</option>
-                <option value="drone_http">🌐 Drone HTTP (Port 8080)</option>
+                <option value="drone_bluetooth" selected>📶 ESP32 Live Stream (USB COM9 / BT)</option>
+                <option value="drone_rtsp">📡 Direct Drone RTSP (Port 7070 - Laptop on Drone Wi-Fi)</option>
+                <option value="drone_http">🌐 Direct Drone HTTP (Port 8080)</option>
                 <option value="webcam">📷 Local Webcam / USB FPV</option>
                 <option value="synthetic">🎮 Simulated Feed</option>
                 <option value="custom">⚙️ Custom Stream URL...</option>
@@ -429,6 +430,7 @@
               <div class="v-conn-specs">
                 <span class="v-tag v-tag-mono">Bluetooth Serial SPP</span>
                 <span class="v-tag v-tag-mono">115200 Baud</span>
+                <span class="v-tag v-tag-mono text-cyan font-bold" style="background:rgba(0,229,255,0.15);border:1px solid rgba(0,229,255,0.4);color:#00e5ff;">👉 Select COM11</span>
                 <span class="v-tag v-tag-mono text-blue">Hardware Coexistence</span>
               </div>
 
@@ -845,6 +847,7 @@ LAND"></textarea>
                 <button id="btn-save-mission" class="v-btn v-btn-secondary btn-sm">💾 Save</button>
                 <button id="btn-download-script" class="v-btn v-btn-ghost btn-sm">📥 Export .txt</button>
                 <button id="btn-upload-script" class="v-btn v-btn-ghost btn-sm">📁 Open .txt</button>
+                <button id="btn-export-mission-csv" class="v-btn v-btn-secondary btn-sm" title="Download Flight Telemetry Log CSV for this Mission">📊 Download Flight Log (CSV)</button>
                 <input type="file" id="mission-file-input" accept=".txt" class="hide">
               </div>
             </div>

@@ -31,6 +31,17 @@ temp/
 tmp/
 *.log
 
+# Arduino / Embedded Build Outputs
+**/build/
+*.bin
+*.elf
+*.hex
+*.map
+.arduino15/
+
+# Scratch & Temporary Testing Scripts
+scratch/
+
 # Operating System Files
 .DS_Store
 Thumbs.db
@@ -41,3 +52,4 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+.agents/

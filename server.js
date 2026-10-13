@@ -166,6 +166,10 @@ function startPyAvRtspRelay() {
     pyAvProcess = null;
   }
 
+  if (droneState.rtspUrl && droneState.rtspUrl.startsWith('bluetooth')) {
+    return;
+  }
+
   const scriptPath = path.join(__dirname, 'rtsp_relay.py');
   console.log(`[*] Spawning PyAV Continuous RTSP Relay -> ${droneState.rtspUrl}`);
 
@@ -225,7 +229,9 @@ function startPyAvRtspRelay() {
 
   pyAvProcess.on('exit', (code) => {
     clearTimeout(pyAvRestartTimer);
-    pyAvRestartTimer = setTimeout(startPyAvRtspRelay, 800);
+    if (!droneState.rtspUrl || !droneState.rtspUrl.startsWith('bluetooth')) {
+      pyAvRestartTimer = setTimeout(startPyAvRtspRelay, 4000);
+    }
   });
 }
 
@@ -500,6 +506,14 @@ wssVideo.on('connection', (ws) => {
       ws.send(droneState.latestFrameBytes, { binary: true });
     } catch (e) {}
   }
+
+  // Ingest Bluetooth FPV frames forwarded from browser client
+  ws.on('message', (message) => {
+    if (Buffer.isBuffer(message) && message.length > 100) {
+      broadcastVideoFrame(message, 'ESP32-Bluetooth');
+    }
+  });
+
   ws.on('close', () => videoClients.delete(ws));
   ws.on('error', () => videoClients.delete(ws));
 });
