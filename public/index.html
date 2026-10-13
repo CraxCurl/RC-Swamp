@@ -182,10 +182,10 @@
           <div class="card-header">
             <div class="card-title-wrap">
               <svg class="title-icon text-cyan" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-              <h3>ONBOARD SENSORS (L3GD20H &amp; BMP180)</h3>
+              <h3>ESP32 I²C SENSORS (L3GD20H &amp; BMP180)</h3>
             </div>
             <div class="coords-head-actions">
-              <span class="card-tag highlight">L3GD20H + BMP180</span>
+              <span id="imuDataSource" class="card-tag">AWAITING ESP32 IMU</span>
             </div>
           </div>
 
@@ -193,15 +193,15 @@
           <div class="cockpit-coords-row">
             <div class="coord-pill pill-blue" title="L3GD20H Angular Velocity around X-Axis (Roll Rate ωx in °/s)">
               <span class="coord-lbl">GYRO ωx (ROLL)</span>
-              <span id="mainGyroX" class="coord-val">+0.0 °/s</span>
+              <span id="mainGyroX" class="coord-val">-- °/s</span>
             </div>
             <div class="coord-pill pill-amber" title="L3GD20H Angular Velocity around Y-Axis (Pitch Rate ωy in °/s)">
               <span class="coord-lbl">GYRO ωy (PITCH)</span>
-              <span id="mainGyroY" class="coord-val">+0.0 °/s</span>
+              <span id="mainGyroY" class="coord-val">-- °/s</span>
             </div>
             <div class="coord-pill pill-green" title="L3GD20H Angular Velocity around Z-Axis (Yaw Rate ωz in °/s)">
               <span class="coord-lbl">GYRO ωz (YAW)</span>
-              <span id="mainGyroZ" class="coord-val">+0.0 °/s</span>
+              <span id="mainGyroZ" class="coord-val">-- °/s</span>
             </div>
           </div>
 
@@ -209,15 +209,15 @@
           <div class="cockpit-imu-subgrid">
             <div class="c-imu-stat" title="BMP180 Atmospheric Pressure in hPa">
               <span class="c-lbl">PRESSURE</span>
-              <span id="mainBaroPress" class="c-val text-cyan">1013.25 hPa</span>
+              <span id="mainBaroPress" class="c-val text-cyan">-- hPa</span>
             </div>
             <div class="c-imu-stat" title="BMP180 Estimated Altitude relative to Reference P0">
               <span class="c-lbl">REL. ALT (h)</span>
-              <span id="mainBaroAlt" class="c-val text-green">0.00 m</span>
+              <span id="mainBaroAlt" class="c-val text-green">-- m</span>
             </div>
             <div class="c-imu-stat" title="BMP180 Sensor Die / Ambient Temperature">
               <span class="c-lbl">TEMPERATURE</span>
-              <span id="mainBaroTemp" class="c-val text-amber">25.0 °C</span>
+              <span id="mainBaroTemp" class="c-val text-amber">-- °C</span>
             </div>
           </div>
 

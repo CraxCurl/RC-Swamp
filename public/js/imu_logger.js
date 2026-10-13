@@ -25,6 +25,8 @@ class DroneIMULogger {
     // Hardware Physical Sensor Ingestion (USB Serial / Bluetooth / ESP32)
     this.hardwareSensorActive = false;
     this.externalSensorData = null;
+    this.lastHardwareSampleAt = 0;
+    this.hardwareSource = '';
     
     // Flight Timers
     this.sessionStartTime = Date.now();
@@ -311,40 +313,53 @@ class DroneIMULogger {
    * Ingests real physical telemetry from external hardware (ESP32, Arduino, L3GD20H, BMP180, or WebSocket)
    */
   injectHardwareTelemetry(sensorData = {}) {
+    // Do not mark the hardware path active until a complete, numeric sensor
+    // sample arrives. This prevents a disconnected/garbled serial line from
+    // being shown as live IMU telemetry.
+    const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
+    const sensorValues = [sensorData.gyroX, sensorData.gx, sensorData.wx, sensorData.gyroRoll,
+      sensorData.gyroY, sensorData.gy, sensorData.wy, sensorData.gyroPitch,
+      sensorData.gyroZ, sensorData.gz, sensorData.wz, sensorData.gyroYaw,
+      sensorData.pressure, sensorData.press, sensorData.p,
+      sensorData.temperature, sensorData.temp, sensorData.t,
+      sensorData.altitude, sensorData.alt];
+    if (!sensorValues.some(isFiniteNumber)) return;
     this.hardwareSensorActive = true;
     this.externalSensorData = sensorData;
+    this.lastHardwareSampleAt = Date.now();
+    this.hardwareSource = sensorData.source || 'ESP32 IMU';
 
     // L3GD20H 3-Axis Gyroscope inputs (deg/s)
-    if (typeof sensorData.gyroX === 'number') this.gyroX = sensorData.gyroX;
-    else if (typeof sensorData.gx === 'number') this.gyroX = sensorData.gx;
-    else if (typeof sensorData.wx === 'number') this.gyroX = sensorData.wx;
-    else if (typeof sensorData.gyroRoll === 'number') this.gyroX = sensorData.gyroRoll;
+    if (isFiniteNumber(sensorData.gyroX)) this.gyroX = sensorData.gyroX;
+    else if (isFiniteNumber(sensorData.gx)) this.gyroX = sensorData.gx;
+    else if (isFiniteNumber(sensorData.wx)) this.gyroX = sensorData.wx;
+    else if (isFiniteNumber(sensorData.gyroRoll)) this.gyroX = sensorData.gyroRoll;
 
-    if (typeof sensorData.gyroY === 'number') this.gyroY = sensorData.gyroY;
-    else if (typeof sensorData.gy === 'number') this.gyroY = sensorData.gy;
-    else if (typeof sensorData.wy === 'number') this.gyroY = sensorData.wy;
-    else if (typeof sensorData.gyroPitch === 'number') this.gyroY = sensorData.gyroPitch;
+    if (isFiniteNumber(sensorData.gyroY)) this.gyroY = sensorData.gyroY;
+    else if (isFiniteNumber(sensorData.gy)) this.gyroY = sensorData.gy;
+    else if (isFiniteNumber(sensorData.wy)) this.gyroY = sensorData.wy;
+    else if (isFiniteNumber(sensorData.gyroPitch)) this.gyroY = sensorData.gyroPitch;
 
-    if (typeof sensorData.gyroZ === 'number') this.gyroZ = sensorData.gyroZ;
-    else if (typeof sensorData.gz === 'number') this.gyroZ = sensorData.gz;
-    else if (typeof sensorData.wz === 'number') this.gyroZ = sensorData.wz;
-    else if (typeof sensorData.gyroYaw === 'number') this.gyroZ = sensorData.gyroYaw;
+    if (isFiniteNumber(sensorData.gyroZ)) this.gyroZ = sensorData.gyroZ;
+    else if (isFiniteNumber(sensorData.gz)) this.gyroZ = sensorData.gz;
+    else if (isFiniteNumber(sensorData.wz)) this.gyroZ = sensorData.wz;
+    else if (isFiniteNumber(sensorData.gyroYaw)) this.gyroZ = sensorData.gyroYaw;
 
     this.gyroMagnitude = Math.sqrt(this.gyroX * this.gyroX + this.gyroY * this.gyroY + this.gyroZ * this.gyroZ);
 
     // BMP180 Barometric Sensor inputs
-    if (typeof sensorData.pressure === 'number') this.pressureHpa = sensorData.pressure;
-    else if (typeof sensorData.press === 'number') this.pressureHpa = sensorData.press;
-    else if (typeof sensorData.p === 'number') this.pressureHpa = sensorData.p;
+    if (isFiniteNumber(sensorData.pressure)) this.pressureHpa = sensorData.pressure;
+    else if (isFiniteNumber(sensorData.press)) this.pressureHpa = sensorData.press;
+    else if (isFiniteNumber(sensorData.p)) this.pressureHpa = sensorData.p;
 
-    if (typeof sensorData.temperature === 'number') this.temperatureC = sensorData.temperature;
-    else if (typeof sensorData.temp === 'number') this.temperatureC = sensorData.temp;
-    else if (typeof sensorData.t === 'number') this.temperatureC = sensorData.t;
+    if (isFiniteNumber(sensorData.temperature)) this.temperatureC = sensorData.temperature;
+    else if (isFiniteNumber(sensorData.temp)) this.temperatureC = sensorData.temp;
+    else if (isFiniteNumber(sensorData.t)) this.temperatureC = sensorData.t;
 
-    if (typeof sensorData.referencePressure === 'number') this.referencePressureHpa = sensorData.referencePressure;
-    else if (typeof sensorData.p0 === 'number') this.referencePressureHpa = sensorData.p0;
+    if (isFiniteNumber(sensorData.referencePressure)) this.referencePressureHpa = sensorData.referencePressure;
+    else if (isFiniteNumber(sensorData.p0)) this.referencePressureHpa = sensorData.p0;
 
-    if (typeof sensorData.altitude === 'number') {
+    if (isFiniteNumber(sensorData.altitude)) {
       this.baroAltitudeM = sensorData.altitude;
       this.posZ = sensorData.altitude;
     } else if (this.referencePressureHpa > 0) {
@@ -357,6 +372,11 @@ class DroneIMULogger {
       pill.textContent = 'L3GD20H & BMP180 ACTIVE';
       pill.className = 'v-tag v-tag-rec text-emerald';
     }
+  }
+
+  hasFreshHardwareTelemetry() {
+    return this.hardwareSensorActive && this.externalSensorData &&
+      (Date.now() - this.lastHardwareSampleAt) < 2000;
   }
 
   /**
@@ -716,7 +736,7 @@ class DroneIMULogger {
     let yawDeg = parseFloat(this.curYawDeg.toFixed(2));
 
     // If external physical hardware IMU sensor is transmitting, override with real hardware values!
-    if (this.hardwareSensorActive && this.externalSensorData) {
+    if (this.hasFreshHardwareTelemetry()) {
       if (typeof this.externalSensorData.roll === 'number') { rollDeg = this.externalSensorData.roll; this.curRollDeg = rollDeg; }
       if (typeof this.externalSensorData.pitch === 'number') { pitchDeg = this.externalSensorData.pitch; this.curPitchDeg = pitchDeg; }
       if (typeof this.externalSensorData.yaw === 'number') { yawDeg = this.externalSensorData.yaw; this.curYawDeg = yawDeg; }
@@ -728,7 +748,7 @@ class DroneIMULogger {
     let gyroY = parseFloat(((this.curPitchDeg - this.prevPitch) / dt).toFixed(2));
     let gyroZ = parseFloat(this.curGyroYaw.toFixed(2));
 
-    if (this.hardwareSensorActive && this.externalSensorData) {
+    if (this.hasFreshHardwareTelemetry()) {
       if (typeof this.externalSensorData.gyroX === 'number') gyroX = this.externalSensorData.gyroX;
       else if (typeof this.externalSensorData.gyroRoll === 'number') gyroX = this.externalSensorData.gyroRoll;
       if (typeof this.externalSensorData.gyroY === 'number') gyroY = this.externalSensorData.gyroY;
@@ -758,7 +778,7 @@ class DroneIMULogger {
 
     const isFlightActive = this.isAirborne || (rawThrottle > 135 || Math.abs(this.curPitchDeg) > 0.4 || Math.abs(this.curRollDeg) > 0.4);
 
-    if (this.hardwareSensorActive && this.externalSensorData && typeof this.externalSensorData.altitude === 'number') {
+    if (this.hasFreshHardwareTelemetry() && typeof this.externalSensorData.altitude === 'number') {
       this.posZ = parseFloat(this.externalSensorData.altitude.toFixed(3));
       this.velZ = parseFloat(((this.posZ - this.prevAltitude) / dt).toFixed(2));
     } else if (isFlightActive) {
@@ -858,7 +878,7 @@ class DroneIMULogger {
     let baroAlt = parseFloat((44330.0 * (1.0 - Math.pow(pressHpa / this.referencePressureHpa, 1.0 / 5.255))).toFixed(3));
     let tempC = this.temperatureC;
 
-    if (this.hardwareSensorActive && this.externalSensorData) {
+    if (this.hasFreshHardwareTelemetry()) {
       if (typeof this.externalSensorData.pressure === 'number') {
         pressHpa = this.externalSensorData.pressure;
         pressPa = parseFloat((pressHpa * 100).toFixed(1));
@@ -1458,20 +1478,35 @@ class DroneIMULogger {
     const elAltHold = document.getElementById('imuAltHold');
     if (elAltHold) elAltHold.textContent = s.altHold ? 'LOCK ON' : 'OFF';
 
-    // 5. Cockpit Main Panel: Onboard Sensors (L3GD20H & BMP180)
+    // 5. Cockpit Main Panel: show only verified ESP32 sensor values. The
+    // RC-UFO control protocol carries commands/video, not its FC IMU data.
+    const hasLiveHardware = this.hasFreshHardwareTelemetry();
+    const external = hasLiveHardware ? this.externalSensorData : null;
+    const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
+    const extGyroX = external && (external.gyroX ?? external.gx ?? external.wx ?? external.gyroRoll);
+    const extGyroY = external && (external.gyroY ?? external.gy ?? external.wy ?? external.gyroPitch);
+    const extGyroZ = external && (external.gyroZ ?? external.gz ?? external.wz ?? external.gyroYaw);
+    const extPressure = external && (external.pressure ?? external.press ?? external.p);
+    const extTemp = external && (external.temperature ?? external.temp ?? external.t);
+    const imuDataSource = document.getElementById('imuDataSource');
+    if (imuDataSource) {
+      imuDataSource.textContent = hasLiveHardware ? `LIVE • ${this.hardwareSource}` :
+        (this.hardwareSensorActive ? 'IMU DATA STALE' : 'AWAITING ESP32 IMU');
+      imuDataSource.className = `card-tag ${hasLiveHardware ? 'highlight' : ''}`;
+    }
     const mainGyroX = document.getElementById('mainGyroX');
-    if (mainGyroX) mainGyroX.textContent = `${gX >= 0 ? '+' : ''}${gX.toFixed(1)} °/s`;
+    if (mainGyroX) mainGyroX.textContent = isFiniteNumber(extGyroX) ? `${extGyroX >= 0 ? '+' : ''}${extGyroX.toFixed(1)} °/s` : '-- °/s';
     const mainGyroY = document.getElementById('mainGyroY');
-    if (mainGyroY) mainGyroY.textContent = `${gY >= 0 ? '+' : ''}${gY.toFixed(1)} °/s`;
+    if (mainGyroY) mainGyroY.textContent = isFiniteNumber(extGyroY) ? `${extGyroY >= 0 ? '+' : ''}${extGyroY.toFixed(1)} °/s` : '-- °/s';
     const mainGyroZ = document.getElementById('mainGyroZ');
-    if (mainGyroZ) mainGyroZ.textContent = `${gZ >= 0 ? '+' : ''}${gZ.toFixed(1)} °/s`;
+    if (mainGyroZ) mainGyroZ.textContent = isFiniteNumber(extGyroZ) ? `${extGyroZ >= 0 ? '+' : ''}${extGyroZ.toFixed(1)} °/s` : '-- °/s';
 
     const mainBaroPress = document.getElementById('mainBaroPress');
-    if (mainBaroPress) mainBaroPress.textContent = `${pressHpa.toFixed(1)} hPa`;
+    if (mainBaroPress) mainBaroPress.textContent = isFiniteNumber(extPressure) ? `${extPressure.toFixed(1)} hPa` : '-- hPa';
     const mainBaroAlt = document.getElementById('mainBaroAlt');
-    if (mainBaroAlt) mainBaroAlt.textContent = `${altM >= 0 ? '+' : ''}${altM.toFixed(2)} m`;
+    if (mainBaroAlt) mainBaroAlt.textContent = isFiniteNumber(extPressure) ? `${altM >= 0 ? '+' : ''}${altM.toFixed(2)} m` : '-- m';
     const mainBaroTemp = document.getElementById('mainBaroTemp');
-    if (mainBaroTemp) mainBaroTemp.textContent = `${tempC.toFixed(1)}°C`;
+    if (mainBaroTemp) mainBaroTemp.textContent = isFiniteNumber(extTemp) ? `${extTemp.toFixed(1)}°C` : '-- °C';
 
     // 6. Render Active Canvas Views
     if (this.currentTab === 'tab-radar' || document.getElementById('mission-modal')?.classList.contains('hide') === false) {

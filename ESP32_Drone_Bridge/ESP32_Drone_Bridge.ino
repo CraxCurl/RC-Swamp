@@ -16,6 +16,7 @@
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <Wire.h>
 #include <nvs_flash.h>
 #include <esp_task_wdt.h>
 #include "BluetoothSerial.h"
@@ -33,6 +34,7 @@ const uint16_t PORT_CAM    = 8080; // Camera handshake port
 
 // Bluetooth Device Name
 const char* BT_DEVICE_NAME = "ESP32_Drone";
+const char* BT_PAIRING_PIN = "1234"; // Windows legacy SPP pairing PIN
 
 // Built-in Blue LED Pin
 #define LED_PIN 2
@@ -49,6 +51,23 @@ unsigned long lastFlightPacket = 0;
 unsigned long lastHeartbeat    = 0;
 unsigned long lastWifiCheck    = 0;
 unsigned long lastBlink        = 0;
+unsigned long lastImuSample    = 0;
+
+// Optional external sensors on the ESP32 I2C bus.  They are detected at boot;
+// the bridge remains fully usable when either board is not fitted.
+constexpr uint8_t I2C_SDA_PIN = 21;
+constexpr uint8_t I2C_SCL_PIN = 22;
+constexpr uint8_t L3GD20H_ADDRESSES[] = { 0x6A, 0x6B };
+constexpr uint8_t BMP180_ADDRESS = 0x77;
+uint8_t l3gd20hAddress = 0;
+bool l3gd20hReady = false;
+bool bmp180Ready = false;
+bool imuStatusSent = false;
+
+struct Bmp180Calibration {
+  int16_t ac1, ac2, ac3, b1, b2, mb, mc, md;
+  uint16_t ac4, ac5, ac6;
+} bmpCal;
 
 // Camera / FPV State
 uint16_t camPort = 8080;
@@ -73,6 +92,126 @@ void logMsg(const String& msg) {
   if (btConnected) {
     SerialBT.println(msg);
   }
+}
+
+bool i2cWriteByte(uint8_t address, uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+bool i2cReadBytes(uint8_t address, uint8_t reg, uint8_t* dest, size_t len) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)address, (int)len) != (int)len) return false;
+  for (size_t i = 0; i < len; ++i) dest[i] = Wire.read();
+  return true;
+}
+
+int16_t readS16BE(uint8_t address, uint8_t reg) {
+  uint8_t b[2];
+  return i2cReadBytes(address, reg, b, 2) ? (int16_t)((b[0] << 8) | b[1]) : 0;
+}
+
+uint16_t readU16BE(uint8_t address, uint8_t reg) {
+  uint8_t b[2];
+  return i2cReadBytes(address, reg, b, 2) ? (uint16_t)((b[0] << 8) | b[1]) : 0;
+}
+
+void initImuSensors() {
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setClock(400000);
+  for (uint8_t address : L3GD20H_ADDRESSES) {
+    uint8_t who = 0;
+    if (i2cReadBytes(address, 0x0F, &who, 1) && who == 0xD7 &&
+        i2cWriteByte(address, 0x20, 0x0F) && // 95 Hz, axes enabled
+        i2cWriteByte(address, 0x23, 0x10)) { // ±500 dps, 17.5 mdps/LSB
+      l3gd20hAddress = address;
+      l3gd20hReady = true;
+      break;
+    }
+  }
+
+  uint8_t chipId = 0;
+  if (i2cReadBytes(BMP180_ADDRESS, 0xD0, &chipId, 1) && chipId == 0x55) {
+    bmpCal.ac1 = readS16BE(BMP180_ADDRESS, 0xAA); bmpCal.ac2 = readS16BE(BMP180_ADDRESS, 0xAC);
+    bmpCal.ac3 = readS16BE(BMP180_ADDRESS, 0xAE); bmpCal.ac4 = readU16BE(BMP180_ADDRESS, 0xB0);
+    bmpCal.ac5 = readU16BE(BMP180_ADDRESS, 0xB2); bmpCal.ac6 = readU16BE(BMP180_ADDRESS, 0xB4);
+    bmpCal.b1 = readS16BE(BMP180_ADDRESS, 0xB6); bmpCal.b2 = readS16BE(BMP180_ADDRESS, 0xB8);
+    bmpCal.mb = readS16BE(BMP180_ADDRESS, 0xBA); bmpCal.mc = readS16BE(BMP180_ADDRESS, 0xBC);
+    bmpCal.md = readS16BE(BMP180_ADDRESS, 0xBE);
+    bmp180Ready = bmpCal.ac4 != 0 && bmpCal.ac5 != 0 && bmpCal.md != 0;
+  }
+  logMsg("IMU_STATUS:L3GD20H=" + String(l3gd20hReady ? "READY" : "NOT_FOUND") +
+         ",BMP180=" + String(bmp180Ready ? "READY" : "NOT_FOUND"));
+}
+
+bool readBmp180(float& pressureHpa, float& tempC) {
+  if (!bmp180Ready || !i2cWriteByte(BMP180_ADDRESS, 0xF4, 0x2E)) return false;
+  delay(5);
+  const int32_t ut = readU16BE(BMP180_ADDRESS, 0xF6);
+  const int32_t x1 = ((ut - (int32_t)bmpCal.ac6) * (int32_t)bmpCal.ac5) >> 15;
+  if (x1 + bmpCal.md == 0) return false;
+  const int32_t x2 = ((int32_t)bmpCal.mc << 11) / (x1 + bmpCal.md);
+  const int32_t b5 = x1 + x2;
+  tempC = ((b5 + 8) >> 4) / 10.0f;
+  if (!i2cWriteByte(BMP180_ADDRESS, 0xF4, 0x34)) return false; // pressure, OSS=0
+  delay(5);
+  const int32_t up = readU16BE(BMP180_ADDRESS, 0xF6);
+  const int32_t b6 = b5 - 4000;
+  const int32_t px1 = ((int32_t)bmpCal.b2 * ((b6 * b6) >> 12)) >> 11;
+  const int32_t px2 = ((int32_t)bmpCal.ac2 * b6) >> 11;
+  const int32_t x3 = px1 + px2;
+  const int32_t b3 = (((int32_t)bmpCal.ac1 * 4 + x3) + 2) >> 2;
+  const int32_t qx1 = ((int32_t)bmpCal.ac3 * b6) >> 13;
+  const int32_t qx2 = ((int32_t)bmpCal.b1 * ((b6 * b6) >> 12)) >> 16;
+  const int32_t qx3 = ((qx1 + qx2) + 2) >> 2;
+  const uint32_t b4 = ((uint32_t)bmpCal.ac4 * (uint32_t)(qx3 + 32768)) >> 15;
+  if (b4 == 0) return false;
+  uint32_t b7 = ((uint32_t)(up - b3)) * 50000UL;
+  int32_t p = b7 < 0x80000000UL ? (b7 << 1) / b4 : (b7 / b4) << 1;
+  const int32_t rx1 = (p >> 8) * (p >> 8);
+  p += (((rx1 * 3038) >> 16) + ((-7357 * p) >> 16) + 3791) >> 4;
+  pressureHpa = p / 100.0f;
+  return p > 10000 && p < 120000;
+}
+
+void serviceImuTelemetry() {
+  if (!btConnected || millis() - lastImuSample < 250) return;
+  lastImuSample = millis();
+  if (!imuStatusSent) {
+    logMsg("IMU_STATUS:L3GD20H=" + String(l3gd20hReady ? "READY" : "NOT_FOUND") +
+           ",BMP180=" + String(bmp180Ready ? "READY" : "NOT_FOUND"));
+    imuStatusSent = true;
+  }
+  if (!l3gd20hReady && !bmp180Ready) return;
+
+  float gx = 0, gy = 0, gz = 0, pressure = 0, temp = 0;
+  bool gyroOk = false, baroOk = false;
+  uint8_t raw[6];
+  if (l3gd20hReady && i2cReadBytes(l3gd20hAddress, 0xA8, raw, 6)) {
+    gx = (int16_t)((raw[1] << 8) | raw[0]) * 0.0175f;
+    gy = (int16_t)((raw[3] << 8) | raw[2]) * 0.0175f;
+    gz = (int16_t)((raw[5] << 8) | raw[4]) * 0.0175f;
+    gyroOk = true;
+  }
+  baroOk = readBmp180(pressure, temp);
+  if (!gyroOk && !baroOk) return;
+  String msg = "IMU:{";
+  bool hasField = false;
+  if (gyroOk) {
+    msg += "\"gyroX\":" + String(gx, 2) + ",\"gyroY\":" + String(gy, 2) +
+           ",\"gyroZ\":" + String(gz, 2);
+    hasField = true;
+  }
+  if (baroOk) {
+    if (hasField) msg += ",";
+    msg += "\"pressure\":" + String(pressure, 2) + ",\"temperature\":" + String(temp, 2);
+  }
+  msg += ",\"source\":\"ESP32_I2C\"}";
+  SerialBT.println(msg);
 }
 
 // ==================== BLUETOOTH CALLBACK ====================
@@ -370,29 +509,41 @@ void processIncomingByte(int b, Stream& stream) {
     }
   }
   else if (b == 't' || b == 'T') {
+    if (!droneAssociated || WiFi.status() != WL_CONNECTED) {
+      logMsg("ERROR:TAKEOFF_BLOCKED:DRONE_WIFI_NOT_READY");
+      return;
+    }
     logMsg("[CMD] Auto-Takeoff");
-    logMsg("ACK:TAKEOFF");
     for (int i = 0; i < 20; i++) {
       sendControlPacket(128, 128, 128, 128, 0x01);
       delay(40);
     }
+    logMsg("ACK:TAKEOFF:UDP_FORWARDED");
   } 
   else if (b == 'l' || b == 'L') {
+    if (!droneAssociated || WiFi.status() != WL_CONNECTED) {
+      logMsg("ERROR:LAND_BLOCKED:DRONE_WIFI_NOT_READY");
+      return;
+    }
     logMsg("[CMD] Auto-Landing");
-    logMsg("ACK:LAND");
     for (int i = 0; i < 20; i++) {
       sendControlPacket(128, 128, 128, 128, 0x02);
       delay(40);
     }
+    logMsg("ACK:LAND:UDP_FORWARDED");
   } 
   else if (b == 's' || b == 'S') {
+    if (!droneAssociated || WiFi.status() != WL_CONNECTED) {
+      logMsg("ERROR:STOP_BLOCKED:DRONE_WIFI_NOT_READY");
+      return;
+    }
     logMsg("[CMD] Emergency Stop");
-    logMsg("ACK:STOP");
     curThrottle = 0;
     for (int i = 0; i < 15; i++) {
       sendControlPacket(128, 128, 0, 128, 0x04);
       delay(40);
     }
+    logMsg("ACK:STOP:UDP_FORWARDED");
   }
   else if (b == 'g' || b == 'G' || b == 'c' || b == 'C') {
     logMsg("[CMD] Gyro Calibration");
@@ -400,6 +551,10 @@ void processIncomingByte(int b, Stream& stream) {
     triggerGyroBinding();
   }
   else if (b == 'h' || b == 'H') {
+    if (!droneAssociated || WiFi.status() != WL_CONNECTED) {
+      logMsg("ERROR:HANDSHAKE_BLOCKED:DRONE_WIFI_NOT_READY");
+      return;
+    }
     logMsg("[CMD] Handshake Wakeup");
     logMsg("ACK:HANDSHAKE");
     for (int i = 0; i < 3; i++) {
@@ -432,8 +587,13 @@ void processIncomingByte(int b, Stream& stream) {
                   ",DRONE_IP=" + droneTargetIP.toString() +
                   ",ESP_IP=" + WiFi.localIP().toString() +
                   ",BT=" + String(btConnected ? "1" : "0") +
+                  ",DRONE=" + String(droneAssociated && WiFi.status() == WL_CONNECTED ? "READY" : "NOT_READY") +
                   ",CAM=" + String(videoClient.connected() ? "LINKED" : "OFFLINE");
     logMsg(stat);
+  }
+  else if (b == 'i' || b == 'I') {
+    imuStatusSent = false;
+    serviceImuTelemetry();
   }
 }
 
@@ -462,17 +622,22 @@ void setup() {
   Serial.println("   AERO-LINK ESP32 DRONE FLIGHT BRIDGE    ");
   Serial.println("==========================================");
 
+  initImuSensors();
+
   // 3. Connect to Drone Wi-Fi FIRST (Must be first to calibrate RF radio)
   WiFi.persistent(false);
   connectToDroneWifi();
 
   // 4. Start Bluetooth SPP (With BLE RAM freed)
   SerialBT.register_callback(btCallback);
-  SerialBT.enableSSP(); // Enables Simple Secure Pairing ("Just Works")
+  // Do not enable SSP/numeric comparison: this headless bridge has no display
+  // or button to accept Windows' changing six-digit confirmation code. Use a
+  // fixed legacy SPP PIN so pairing can complete reliably.
   if (!SerialBT.begin(BT_DEVICE_NAME, false, true)) {
     Serial.println("[BT] Error starting Bluetooth!");
   } else {
-    Serial.printf("[BT] Bluetooth Ready as '%s'\n", BT_DEVICE_NAME);
+    SerialBT.setPin(BT_PAIRING_PIN, 4);
+    Serial.printf("[BT] Bluetooth Ready as '%s' (PIN %s)\n", BT_DEVICE_NAME, BT_PAIRING_PIN);
   }
 }
 
@@ -520,6 +685,9 @@ void loop() {
 
   // 6. Non-blocking Camera / Video Stream Relay
   serviceVideoRelay();
+
+  // 7. Forward only verified I2C sensor samples to the cockpit.
+  serviceImuTelemetry();
 
   // FreeRTOS yield
   vTaskDelay(pdMS_TO_TICKS(2));

@@ -72,10 +72,10 @@
 
 html, body {
   width: 100%;
-  min-height: 100vh;
-  height: auto;
+  height: 100%;
+  min-height: 100%;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   background-color: var(--vercel-bg);
   font-family: var(--font-sans);
   color: var(--text-primary);
@@ -94,8 +94,9 @@ html, body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-height: 100vh;
-  height: auto;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   background: radial-gradient(circle at 50% 0%, #111111 0%, #000000 80%);
 }
 
@@ -303,15 +304,21 @@ html, body {
   transform: translateY(-1px);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.5);
+}
+
 /* ==================== 3-COLUMN MAIN DASHBOARD ==================== */
 .aerolink-dashboard {
   display: grid;
   grid-template-columns: 310px 1fr 340px;
   gap: 12px;
   padding: 12px 16px;
-  min-height: calc(100vh - 52px);
-  height: auto;
-  overflow-y: auto;
+  min-height: 0;
+  height: calc(100vh - 52px);
+  overflow: hidden;
   overflow-x: hidden;
 }
 
@@ -326,9 +333,36 @@ html, body {
 @media (max-width: 900px) {
   .aerolink-dashboard {
     grid-template-columns: 1fr;
-    overflow-y: auto;
-    height: auto;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    overflow: hidden;
+    height: calc(100vh - 52px);
   }
+}
+
+/* Keep the cockpit itself in one viewport. Long-lived output remains inside
+   its own terminal/modal panes instead of making the document scroll. */
+@media (min-width: 901px) {
+  .col-left, .col-center, .col-right { height: 100%; }
+  .col-left { gap: clamp(5px, 1.2vh, 12px); }
+  .col-center { gap: clamp(5px, 1.2vh, 12px); }
+  .attitude-card { flex: 1.05 1 0; min-height: 0; }
+  .command-card { flex: 0.9 1 0; min-height: 0; }
+  .cockpit-imu-card { flex: 0.8 1 0; min-height: 0; overflow: hidden; }
+  .video-card { flex: 1.45 1 0; min-height: 0; }
+  .joystick-card { flex: 0.75 1 0; min-height: 0; }
+  .video-viewport-wrapper { min-height: 0; }
+  .horizon-sphere-wrapper { padding: clamp(4px, 1.2vh, 12px) 0; }
+  .attitude-canvas { width: clamp(110px, 19vh, 180px); height: clamp(110px, 19vh, 180px); }
+  .command-card { padding: clamp(5px, 1.2vh, 10px); gap: clamp(4px, 1vh, 8px); }
+  .cmd-btn { padding: clamp(4px, 1vh, 10px) 6px; }
+  .cmd-icon-circle { width: clamp(22px, 4vh, 32px); height: clamp(22px, 4vh, 32px); }
+  .joysticks-pod-container { padding: clamp(5px, 1.2vh, 10px) 14px; }
+  .aero-stick-base { width: clamp(82px, 16vh, 130px); height: clamp(82px, 16vh, 130px); }
+  .outer-ring { width: 72%; height: 72%; }
+  .mid-ring { width: 42%; height: 42%; }
+  .cockpit-imu-card { gap: clamp(3px, 0.8vh, 8px); }
+  .coord-pill { padding: clamp(3px, 0.8vh, 6px); }
+  .cockpit-sensor-notice { display: none; }
 }
 
 /* Vercel Card Frame */
@@ -399,6 +433,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 /* Attitude Card */
@@ -596,6 +631,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .video-card {
@@ -869,10 +905,12 @@ html, body {
 .col-right {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .terminal-card {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }

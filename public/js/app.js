@@ -148,6 +148,31 @@ document.addEventListener('DOMContentLoaded', () => {
   let fallbackImg = new Image();
   let currentBlobUrl = null;
   let lastVideoPacketTime = Date.now();
+  let esp32DroneReady = false;
+
+  function setEsp32ConnectionUi(connected, detail = '') {
+    state.btConnected = connected;
+    if (btnBtStatusPill) btnBtStatusPill.className = `pill-badge ${connected ? 'pill-green' : 'pill-red'}`;
+    if (btStatusText) btStatusText.textContent = connected ? 'ESP32 CONNECTED' : 'BT DISCONNECTED';
+    if (btnConnectBt) {
+      btnConnectBt.innerHTML = connected
+        ? '<span>DISCONNECT ESP32</span>'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/></svg><span>CONNECT ESP32 (USB / BT)</span>';
+    }
+    updateBtUIModal(connected, detail || (connected ? 'ESP32 connected — status check pending' : 'Disconnected'));
+    if (!connected) esp32DroneReady = false;
+  }
+
+  function updateBridgeControlAvailability() {
+    const controls = [btnTakeoff, btnLand, btnEmergency, btnCalibrate, btnHandshake, btnBtTakeoff, btnBtLand, btnBtStop];
+    const isBluetoothMode = state.connectionMode === 'bluetooth';
+    const enabled = !isBluetoothMode || (isEsp32Connected && esp32DroneReady);
+    controls.forEach(button => {
+      if (!button) return;
+      button.disabled = !enabled;
+      button.title = enabled ? button.dataset.readyTitle || button.title : 'Waiting for ESP32 connection to the drone Wi-Fi';
+    });
+  }
 
   // ----------------- TERMINAL LOGGING ----------------- //
   function logTerminal(msg, type = 'normal') {
@@ -177,7 +202,6 @@ document.addEventListener('DOMContentLoaded', () => {
   async function disconnectEsp32() {
     try {
       isEsp32Connected = false;
-      state.btConnected = false;
       if (serialReader) {
         try { await serialReader.cancel(); } catch (e) {}
         try { serialReader.releaseLock(); } catch (e) {}
@@ -191,12 +215,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try { await esp32Port.close(); } catch (e) {}
         esp32Port = null;
       }
-      if (btnBtStatusPill) {
-        btnBtStatusPill.className = 'pill-badge pill-red';
-      }
-      if (btStatusText) btStatusText.textContent = 'BT DISCONNECTED';
-      if (btnConnectBt) btnConnectBt.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/></svg><span>CONNECT ESP32 (BT)</span>';
-      updateBtUIModal(false, 'Disconnected');
+      setEsp32ConnectionUi(false);
+      updateBridgeControlAvailability();
       logTerminal('ESP32 Disconnected.', 'dim');
     } catch (e) {
       logTerminal(`Disconnect note: ${e.message}`, 'dim');
@@ -229,28 +249,18 @@ document.addEventListener('DOMContentLoaded', () => {
         try { await esp32Port.close(); } catch (e) {}
       }
 
-      logTerminal('Requesting ESP32 Serial / Bluetooth port...', 'dim');
-      logTerminal('👉 RECOMMENDED: Select "CP210x USB to UART Bridge (COM9)" for instant high-speed USB link!', 'ack');
-      logTerminal('👉 (Or select "Standard Serial (COM11)" if paired over Bluetooth).', 'dim');
+      logTerminal('Select the paired ESP32_Drone Standard Serial (Bluetooth SPP) COM port, or its USB COM port.', 'dim');
       esp32Port = await navigator.serial.requestPort();
       
       logTerminal('Opening port at 115200 baud...', 'dim');
-      const openPromise = esp32Port.open({ baudRate: 115200 });
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timed out after 5 seconds. If you selected a Bluetooth port, make sure ESP32_Drone is paired, OR select "CP210x USB to UART Bridge (COM9)" to connect instantly over USB cable!')), 5000)
-      );
-      await Promise.race([openPromise, timeoutPromise]);
+      // Windows Bluetooth SPP appears as a serial COM port. Its baud rate is a
+      // Web Serial requirement; Bluetooth itself negotiates the transport speed.
+      await esp32Port.open({ baudRate: 115200, bufferSize: 65536 });
 
       esp32Writer = esp32Port.writable.getWriter();
       isEsp32Connected = true;
-      state.btConnected = true;
-
-      // Update UI Header
-      if (btnBtStatusPill) {
-        btnBtStatusPill.className = 'pill-badge pill-green';
-      }
-      if (btStatusText) btStatusText.textContent = 'ESP32 CONNECTED';
-      if (btnConnectBt) btnConnectBt.innerHTML = '<span>DISCONNECT ESP32</span>';
+      setEsp32ConnectionUi(true, 'ESP32 connected — requesting bridge status…');
+      updateBridgeControlAvailability();
 
       logTerminal('✅ ESP32 Connected successfully! (115200 Baud)', 'ack');
       updateBtUIModal(true, 'ESP32 Connected (115200 Baud)');
@@ -258,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Send initial status ping
       sendEsp32Command('P\n');
+      sendEsp32Command('I\n', true); // request an immediate physical-sensor status/sample
     } catch (err) {
       console.warn('ESP32 serial error:', err);
       if (err.name !== 'NotFoundError') {
@@ -272,6 +283,15 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       isConnectingSerial = false;
     }
+  }
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', (event) => {
+      if (event.target === esp32Port) {
+        logTerminal('ESP32 serial device was disconnected.', 'warn');
+        disconnectEsp32();
+      }
+    });
   }
 
   async function readEsp32SerialStream(port) {
@@ -298,8 +318,32 @@ document.addEventListener('DOMContentLoaded', () => {
       for (const l of lines) {
         const trimmed = l.trim();
         if (trimmed) {
-          if (trimmed.startsWith('ACK:')) logTerminal(trimmed, 'ack');
-          else if (trimmed.startsWith('STATUS:')) logTerminal(trimmed, 'out');
+          if (trimmed.startsWith('IMU:')) {
+            try {
+              const sensorData = JSON.parse(trimmed.slice(4));
+              if (window.droneImu) window.droneImu.injectHardwareTelemetry(sensorData);
+            } catch (e) {
+              logTerminal(`Invalid IMU sample ignored: ${e.message}`, 'warn');
+            }
+          } else if (trimmed.startsWith('IMU_STATUS:')) {
+            const status = trimmed.slice('IMU_STATUS:'.length);
+            logTerminal(`IMU ${status}`, status.includes('READY') ? 'ack' : 'warn');
+          } else if (trimmed.startsWith('ACK:')) {
+            logTerminal(trimmed, 'ack');
+            if (trimmed.startsWith('ACK:TAKEOFF')) {
+              state.isAirborne = true;
+              if (window.droneImu) window.droneImu.setAirborne(true);
+            } else if (trimmed.startsWith('ACK:LAND') || trimmed.startsWith('ACK:STOP')) {
+              state.isAirborne = false;
+              if (window.droneImu) window.droneImu.setAirborne(false);
+            }
+          } else if (trimmed.startsWith('STATUS:')) {
+            const wifiReady = /WIFI=CONNECTED/.test(trimmed) && /DRONE=READY/.test(trimmed);
+            esp32DroneReady = wifiReady;
+            updateBridgeControlAvailability();
+            updateBtUIModal(wifiReady, wifiReady ? 'Bridge ready: ESP32 → drone Wi‑Fi connected' : 'ESP32 connected, but drone Wi‑Fi is not ready');
+            logTerminal(trimmed, wifiReady ? 'ack' : 'warn');
+          }
           else if (trimmed.startsWith('[VIDEO]') || trimmed.startsWith('[WIFI]') || trimmed.startsWith('[BT]')) logTerminal(trimmed, 'ack');
           else if (trimmed.includes('FAIL') || trimmed.includes('Error')) logTerminal(trimmed, 'err');
           else logTerminal(trimmed, 'out');
@@ -870,22 +914,16 @@ document.addEventListener('DOMContentLoaded', () => {
   function dispatchFlightCommand(payload) {
     if (!payload) return;
 
+    const isBluetoothMode = state.connectionMode === 'bluetooth';
+    const requiresBridge = ['takeoff', 'land', 'emergency_stop', 'calibrate_gyro', 'handshake', 'stick'].includes(payload.action);
+    if (isBluetoothMode && requiresBridge && (!isEsp32Connected || !esp32DroneReady)) {
+      logTerminal('Control blocked: ESP32 must report DRONE=READY. Check its Wi-Fi/SSID, then reconnect or press Ping.', 'err');
+      if (isEsp32Connected) sendEsp32Command('P\n', true);
+      return;
+    }
+
     // Update internal state from dispatched flight commands (supports live simulation & manual controls)
-    if (payload.action === 'takeoff') {
-      state.isAirborne = true;
-      if (window.droneImu) window.droneImu.setAirborne(true);
-      if (armedStatusBadge) {
-        armedStatusBadge.className = 'badge-armed';
-        armedStatusBadge.textContent = 'ARMED / FLYING';
-      }
-    } else if (payload.action === 'land') {
-      state.isAirborne = false;
-      if (window.droneImu) window.droneImu.setAirborne(false);
-      if (armedStatusBadge) {
-        armedStatusBadge.className = 'badge-disarmed';
-        armedStatusBadge.textContent = 'DISARMED';
-      }
-    } else if (payload.action === 'stick') {
+    if (payload.action === 'stick') {
       if (typeof payload.roll === 'number') state.roll = payload.roll;
       if (typeof payload.pitch === 'number') state.pitch = payload.pitch;
       if (typeof payload.throttle === 'number') state.throttle = payload.throttle;
@@ -1044,33 +1082,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ----------------- ACTION BUTTON EVENTS ----------------- //
   function triggerTakeoff() {
-    state.isAirborne = true;
-    if (armedStatusBadge) {
-      armedStatusBadge.className = 'badge-armed';
-      armedStatusBadge.textContent = 'ARMED / FLYING';
-    }
-    if (window.droneImu) window.droneImu.setAirborne(true);
     dispatchFlightCommand({ action: 'takeoff' });
   }
 
   function triggerLand() {
-    state.isAirborne = false;
-    if (armedStatusBadge) {
-      armedStatusBadge.className = 'badge-disarmed';
-      armedStatusBadge.textContent = 'DISARMED';
-    }
-    if (window.droneImu) window.droneImu.setAirborne(false);
     dispatchFlightCommand({ action: 'land' });
   }
 
   function triggerEmergency() {
-    state.isAirborne = false;
-    state.throttle = 0;
-    if (armedStatusBadge) {
-      armedStatusBadge.className = 'badge-disarmed';
-      armedStatusBadge.textContent = 'DISARMED (KILL)';
-    }
-    if (window.droneImu) window.droneImu.setAirborne(false);
     dispatchFlightCommand({ action: 'emergency_stop' });
   }
 
@@ -1084,6 +1103,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnBtLand) btnBtLand.addEventListener('click', triggerLand);
   if (btnBtStop) btnBtStop.addEventListener('click', triggerEmergency);
   if (btnBtPing) btnBtPing.addEventListener('click', () => sendEsp32Command('P\n'));
+  updateBridgeControlAvailability();
 
   // ----------------- VIRTUAL JOYSTICKS ----------------- //
   new VirtualJoystick('leftJoystickWrapper', 'leftJoystickNipple', (x, y) => {
@@ -1150,6 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
       cardWifiMode.classList.add('active');
       cardBtMode.classList.remove('active');
       connectionModal.classList.add('hide');
+      updateBridgeControlAvailability();
       logTerminal('Switched to Direct Wi-Fi Connection Mode', 'normal');
     });
   }
@@ -1161,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
       cardBtMode.classList.add('active');
       cardWifiMode.classList.remove('active');
       connectionModal.classList.add('hide');
+      updateBridgeControlAvailability();
       logTerminal('Switched to ESP32 Bluetooth Bridge Mode', 'normal');
     });
   }

@@ -74,6 +74,22 @@ The full source code is located in [`ESP32_Drone_Bridge.ino`](file:///d:/SwarmDr
 
 ## 4. How to Flash & Connect
 
+### Optional live IMU wiring (now verified by the bridge at boot)
+
+The bridge auto-detects an **L3GD20H** gyroscope at I²C `0x6A` or `0x6B` and a
+**BMP180** barometer at `0x77`. Connect both modules to the same ESP32 I²C bus:
+
+| ESP32 | L3GD20H / BMP180 |
+| --- | --- |
+| GPIO 21 | SDA |
+| GPIO 22 | SCL |
+| 3.3 V | VIN / VCC (use 3.3 V logic) |
+| GND | GND |
+
+On boot and again after an SPP connection, the terminal reports `IMU_STATUS`.
+Only detected sensors with valid readings are forwarded to the cockpit; missing
+hardware is reported as `NOT_FOUND` rather than being presented as live data.
+
 ### Step 1: Flash the Firmware
 1. Open Arduino IDE.
 2. Open [`ESP32_Drone_Bridge.ino`](file:///d:/SwarmDrone/RC-Swamp/ESP32_Drone_Bridge.ino).
